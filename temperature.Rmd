@@ -26,7 +26,7 @@ my_pal <- c("#EE9C39", "#20A47B", "#5A3920")
 ```{r}
 loc_path <- "./data/temp/marmolada"
 
-data <- NULL
+temp_data <- NULL
 for (type in c("min", "avg", "max")) {
     file <- list.files(
         path = loc_path,
@@ -40,13 +40,13 @@ for (type in c("min", "avg", "max")) {
 
     tmp_df <- tmp_df |>
         pivot_longer(-year, names_to = "month", values_to = "value") |>
-        add_column(variable = paste0(type, "_temp"), .after = "month") |>
+        add_column(variable = type, .after = "month") |>
         mutate(month = make_date(year = year, month = month)) |>
         select(-year)
 
-    data <- rbind(data, tmp_df)
+    temp_data <- rbind(temp_data, tmp_df)
 }
 
 # order by date
-data <- arrange(data, month)
+temp_data <- arrange(temp_data, month)
 ```
