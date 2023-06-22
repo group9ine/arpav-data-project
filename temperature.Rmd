@@ -22,3 +22,31 @@ library(tidyverse)
 theme_set(theme_minimal(base_size = 14, base_family = "Roboto Condensed"))
 my_pal <- c("#EE9C39", "#20A47B", "#5A3920")
 ```
+
+```{r}
+loc_path <- "./data/temp/marmolada"
+
+data <- NULL
+for (type in c("min", "avg", "max")) {
+    file <- list.files(
+        path = loc_path,
+        full.names = TRUE,
+        pattern = paste0("*", type, ".csv")
+    )
+
+    tmp_df <- read.csv(file, sep = ";", na.strings = ">>")
+    tmp_df <- tmp_df[-ncol(tmp_df)]
+    names(tmp_df) <- c("year", 1:12)
+
+    tmp_df <- tmp_df |>
+        pivot_longer(-year, names_to = "month", values_to = "value") |>
+        add_column(variable = paste0(type, "_temp"), .after = "month") |>
+        mutate(month = make_date(year = year, month = month)) |>
+        select(-year)
+
+    data <- rbind(data, tmp_df)
+}
+
+# order by date
+data <- arrange(data, month)
+```
