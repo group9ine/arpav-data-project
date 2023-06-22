@@ -24,7 +24,7 @@ my_pal <- c("#EE9C39", "#20A47B", "#5A3920")
 ```
 
 ```{r}
-loc_path <- "./data/temp/marmolada"
+loc_path <- "./data/temp/malo"
 
 temp_data <- NULL
 for (type in c("min", "avg", "max")) {
@@ -41,12 +41,18 @@ for (type in c("min", "avg", "max")) {
     tmp_df <- tmp_df |>
         pivot_longer(-year, names_to = "month", values_to = "value") |>
         add_column(variable = type, .after = "month") |>
-        mutate(month = make_date(year = year, month = month)) |>
-        select(-year)
+        mutate(date = make_date(year = year, month = month)) |>
+        select(-c(year, month))
 
     temp_data <- rbind(temp_data, tmp_df)
 }
 
-# order by date
-temp_data <- arrange(temp_data, month)
+temp_data <- arrange(temp_data, date) |>
+    pivot_wider(names_from = "variable", values_from = "value")
+```
+
+```{r}
+ggplot(temp_data, aes(x = date)) +
+    geom_line(aes(y = avg), linewidth = 0.8, colour = my_pal[1]) +
+    geom_ribbon(aes(ymin = min, ymax = max), fill = my_pal[1], alpha = 0.5)
 ```
