@@ -16,7 +16,6 @@ knitr::opts_chunk$set(message = FALSE, dev = "svg")
 ```
 
 ```{r}
-library(kableExtra)
 library(tidyverse)
 
 theme_set(theme_minimal(base_size = 14, base_family = "Roboto Condensed"))
@@ -41,8 +40,12 @@ for (type in c("min", "avg", "max")) {
     tmp_df <- tmp_df |>
         pivot_longer(-year, names_to = "month", values_to = "value") |>
         add_column(variable = type, .after = "month") |>
-        mutate(date = make_date(year = year, month = month)) |>
-        select(-c(year, month))
+        mutate(
+            date = make_date(year = year, month = month), .before = 1
+        ) |>
+        mutate(month = factor(
+            month.abb[as.integer(month)], levels = month.abb)
+        )
 
     temp_data <- rbind(temp_data, tmp_df)
 }
@@ -52,7 +55,30 @@ temp_data <- arrange(temp_data, date) |>
 ```
 
 ```{r}
-ggplot(temp_data, aes(x = date)) +
-    geom_line(aes(y = avg), linewidth = 0.8, colour = my_pal[1]) +
-    geom_ribbon(aes(ymin = min, ymax = max), fill = my_pal[1], alpha = 0.5)
+years <- unique(temp_data$year)
+
+baseline <- temp_data |>
+    filter(year <= years[5]) |>
+    group_by(month) |>
+    summarize(avg = mean(avg))
+
+my_pal <- wesanderson::wes_palette("Zissou1", 10, "continuous")
+temp_data |>
+    group_by(year) |>
+    mutate(avg = avg - baseline$avg) |>
+    ungroup() |>
+    ggplot() +
+        geom_tile(aes(x = year, y = fct_rev(month), fill = avg)) +
+        scale_x_continuous(
+            breaks = scales::pretty_breaks(),
+            expand = c(0, 0)
+        ) +
+        scale_fill_gradientn(colours = my_pal) +
+        labs(
+            x = "Year", y = "Month", fill = "Deviation (°C)",
+            title = paste0(
+                "Deviation of the average monthly temperature from the ",
+                years[1], "-", years[5], " period"
+            )
+        )
 ```
