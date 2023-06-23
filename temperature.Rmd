@@ -51,7 +51,8 @@ for (type in c("min", "avg", "max")) {
 }
 
 temp_data <- arrange(temp_data, date) |>
-    pivot_wider(names_from = "variable", values_from = "value")
+    pivot_wider(names_from = "variable", values_from = "value") |>
+    na.omit()
 ```
 
 ```{r}
@@ -62,18 +63,18 @@ baseline <- temp_data |>
     group_by(month) |>
     summarize(avg = mean(avg))
 
-my_pal <- wesanderson::wes_palette("Zissou1", 10, "continuous")
 temp_data |>
-    group_by(year) |>
-    mutate(avg = avg - baseline$avg) |>
-    ungroup() |>
+    inner_join(baseline, by = "month") |>
+    mutate(avg = avg.x - avg.y) |>
     ggplot() +
         geom_tile(aes(x = year, y = fct_rev(month), fill = avg)) +
         scale_x_continuous(
             breaks = scales::pretty_breaks(),
             expand = c(0, 0)
         ) +
-        scale_fill_gradientn(colours = my_pal) +
+        scale_fill_gradientn(
+            colours = wesanderson::wes_palette("Zissou1", 10, "continuous")
+        ) +
         labs(
             x = "Year", y = "Month", fill = "Deviation (°C)",
             title = paste0(
