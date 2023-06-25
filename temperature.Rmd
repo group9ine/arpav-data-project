@@ -25,7 +25,7 @@ set.seed(global_seed)
 
 global_font <- "Roboto Condensed"
 theme_set(theme_minimal(base_size = 15, base_family = global_font))
-my_pal <- c("#EE9C39", "#20A47B", "#5A3920")
+my_pal <- wesanderson::wes_palette("Zissou1", 5)[c(1, 3, 5)]
 ```
 
 ```{r}
@@ -289,12 +289,35 @@ plot_chains <- function(chain, params) {
 ```
 
 ```{r}
+lin_chain <- regression("porto_tolle", lin_model, lin_pars)
+
+lin_df <- do.call(rbind.data.frame, lin_chain)
+sig_level <- quantile(lin_df$b, probs = 0.05)
+
+ggplot(lin_df) +
+    geom_density(aes(b), colour = my_pal[1], fill = my_pal[1], alpha = 0.5) +
+    geom_area(
+        aes(x, y),
+        data = tibble(
+            x = density(lin_df$b, from = -0.01, to = sig_level)$x,
+            y = density(lin_df$b, from = -0.01, to = sig_level)$y),
+        colour = my_pal[3], fill = my_pal[3], alpha = 0.5
+    ) +
+    geom_vline(xintercept = 0, colour = my_pal[2], linewidth = 0.8) +
+    coord_cartesian(expand = FALSE)
+```
+
+```{r}
 quad_chain <- regression("porto_tolle", quad_model, quad_pars) |>
     plot_chains(quad_pars)
 ```
 
 ```{r}
-quad_model <- "
+lm_fit <- lm(avg ~ year + I(year^2), get_yearly_data("porto_tolle"))
+lm_params <- summary(lm_fit)$coefficients[, 1]
+lm_errs <- summary(lm_fit)$coefficients[, 2]
+
+quad_model <- sprintf("
     model {
         tau <- 1 / sigma^2
 
@@ -303,11 +326,22 @@ quad_model <- "
             avg[i] ~ dnorm(mu[i], tau)
         }
         
-        a ~ dnorm(0, 1e-6)
-        b ~ dnorm(0, 1e-6)
-        c ~ dnorm(0, 1e-6)
+        a ~ dnorm(%e, %e)
+        b ~ dnorm(%e, %e)
+        c ~ dnorm(%e, %e)
         sigma ~ dexp(0.0001)
-    }"
+    }",
+    lm_params[1], 1 / lm_errs[1]^2,
+    lm_params[2], 1 / lm_errs[2]^2,
+    lm_params[3], 1 / lm_errs[3]^2
+)
 
 quad_pars <- c("a", "b", "c", "sigma")
+
+quad_chain <- regression("porto_tolle", quad_model, quad_pars)
+
+best_pars <- quad_chain |>
+    tidybayes::tidy_draws() |>
+    select(a, b, c, sigma) |>
+    summarize(a = mean(a), b = mean(b), c = mean(c), sigma = mean(sigma))
 ```
