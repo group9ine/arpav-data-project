@@ -130,10 +130,8 @@ lm_params <- summary(lm_fit)$coefficients[, 1]
 lm_errs <- summary(lm_fit)$coefficients[, 2]
 ```
 ```{r}
-model <- sprintf("
+lin_model <- sprintf("
     model {
-        tau <- 1 / sigma^2
-
         for (i in 1:length(year)) {
             mu[i] <- a + b * year[i]
             avg[i] ~ dnorm(mu[i], tau)
@@ -142,18 +140,26 @@ model <- sprintf("
         a ~ dnorm(%f, %f)
         b ~ dnorm(%f, %f)
         sigma ~ dexp(0.001)
+
+        tau <- 1 / sigma^2
     }",
     lm_params[1], 1 / lm_errs[1]^2,
     lm_params[2], 1 / lm_errs[2]^2
 )
 
-pars <- c("a", "b", "sigma")
+lin_pars <- c("a", "b", "sigma")
 
-chain <- jags(
+lin_chain <- R2jags::jags(
     data = yearly_data,
-    inits = function() list(a = 0, b = 0, sigma = 1),
-    parameters.to.save = pars,
-    model.file = textConnection(model),
+    inits = function() {
+        list(
+            a = runif(1, -200, 0),
+            b = runif(1, 0, 0.1),
+            sigma = runif(1, 0, 1)
+        )
+    },
+    parameters.to.save = lin_pars,
+    model.file = textConnection(lin_model),
     n.chains = 3,
     n.iter = 100000,
     n.burnin = 2000,
@@ -164,7 +170,7 @@ chain <- jags(
 
 ```{r, fig.width = 10, fig.height = 8}
 trace_plt <- mcmc_trace(
-    chain, pars = pars,
+    lin_chain, pars = lin_pars,
     facet_args = list(nrow = 3, labeller = label_parsed)
 ) +
     facet_text(size = 15) +
@@ -172,7 +178,59 @@ trace_plt <- mcmc_trace(
     bayesplot::theme_default(base_size = 15, base_family = global_font)
 
 dens_plt <- mcmc_dens_overlay(
-    chain, pars = pars,
+    lin_chain, pars = lin_pars,
+    facet_args = list(nrow = 3, labeller = label_parsed)
+) +
+    facet_text(size = 15) +
+    labs(title = "Densities") +
+    bayesplot::theme_default(base_size = 15, base_family = global_font)
+
+gridExtra::grid.arrange(trace_plt, dens_plt, ncol = 2)
+```
+
+```{r}
+const_model <- sprintf("
+    model {
+        for (i in 1:length(year)) {
+            avg[i] ~ dnorm(a, tau);
+        }
+
+        a ~ dnorm(%f, %f);
+        sigma ~ dexp(0.0001);
+
+        tau <- 1 / sigma^2
+    }",
+    mean(yearly_data$avg), 1 / sd(yearly_data$avg)^2
+)
+
+const_pars <- c("a", "sigma")
+
+const_chain <- R2jags::jags(
+    data = yearly_data,
+    inits = function() {
+        list(a = runif(1, 0, 20), sigma = runif(0, 1))
+    },
+    parameters.to.save = const_pars,
+    model.file = textConnection(const_model),
+    n.chains = 3,
+    n.iter = 100000,
+    n.burnin = 2000,
+    n.thin = 10,
+    DIC = FALSE
+) |> as.mcmc()
+```
+
+```{r}
+trace_plt <- mcmc_trace(
+    const_chain, pars = const_pars,
+    facet_args = list(nrow = 3, labeller = label_parsed)
+) +
+    facet_text(size = 15) +
+    labs(title = "Traces") +
+    bayesplot::theme_default(base_size = 15, base_family = global_font)
+
+dens_plt <- mcmc_dens_overlay(
+    const_chain, pars = const_pars,
     facet_args = list(nrow = 3, labeller = label_parsed)
 ) +
     facet_text(size = 15) +
