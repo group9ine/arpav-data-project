@@ -123,29 +123,21 @@ yearly_data <- daily_data |>
     filter(year %in% full_years) |>
     group_by(year) |>
     summarize(avg = mean(avg))
-
-# standard linear fit to get prior parameters
-lm_fit <- lm(avg ~ year, yearly_data)
-lm_params <- summary(lm_fit)$coefficients[, 1]
-lm_errs <- summary(lm_fit)$coefficients[, 2]
 ```
 ```{r}
-lin_model <- sprintf("
+lin_model <- "
     model {
+        tau <- 1 / sigma^2
+
         for (i in 1:length(year)) {
             mu[i] <- a + b * year[i]
             avg[i] ~ dnorm(mu[i], tau)
         }
         
-        a ~ dnorm(%f, %f)
-        b ~ dnorm(%f, %f)
-        sigma ~ dexp(0.001)
-
-        tau <- 1 / sigma^2
-    }",
-    lm_params[1], 1 / lm_errs[1]^2,
-    lm_params[2], 1 / lm_errs[2]^2
-)
+        a ~ dnorm(0, 1e-6)
+        b ~ dnorm(0, 1e-6)
+        sigma ~ dexp(0.0001)
+    }"
 
 lin_pars <- c("a", "b", "sigma")
 
@@ -154,7 +146,7 @@ lin_chain <- R2jags::jags(
     inits = function() {
         list(
             a = runif(1, -200, 0),
-            b = runif(1, 0, 0.1),
+            b = runif(1, 0, 1),
             sigma = runif(1, 0, 1)
         )
     },
@@ -189,19 +181,17 @@ gridExtra::grid.arrange(trace_plt, dens_plt, ncol = 2)
 ```
 
 ```{r}
-const_model <- sprintf("
+const_model <- "
     model {
+        tau <- 1 / sigma^2
+
         for (i in 1:length(year)) {
             avg[i] ~ dnorm(a, tau);
         }
 
-        a ~ dnorm(%f, %f);
+        a ~ dnorm(0, 1e-6)
         sigma ~ dexp(0.0001);
-
-        tau <- 1 / sigma^2
-    }",
-    mean(yearly_data$avg), 1 / sd(yearly_data$avg)^2
-)
+    }"
 
 const_pars <- c("a", "sigma")
 
