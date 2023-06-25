@@ -345,3 +345,27 @@ best_pars <- quad_chain |>
     select(a, b, c, sigma) |>
     summarize(a = mean(a), b = mean(b), c = mean(c), sigma = mean(sigma))
 ```
+
+```{r}
+porto_tolle <- get_yearly_data("porto_tolle")
+auronzo <- get_yearly_data("auronzo")
+
+inner_join(porto_tolle, auronzo, by = "year", suffix = c(".pt", ".au")) |>
+    ggplot(aes(x = avg.pt, y = avg.au)) +
+        geom_point(aes(colour = year), size = 3) +
+        ggrepel::geom_label_repel(
+            aes(label = year, colour = year),
+            data = \(x) x |> filter(row_number() %% 3 == 1),
+            min.segment.length = 0,
+            box.padding = 0.5
+        ) +
+        labs(
+            x = "Porto Tolle temperature (°C)",
+            y = "Auronzo temperature (°C)",
+            colour = "Year",
+            title = paste(
+                "Comparison of the average yearly temperatures in",
+                "Porto Tolle and Auronzo"
+            )
+        )
+```
