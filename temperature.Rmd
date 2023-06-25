@@ -29,51 +29,41 @@ my_pal <- c("#EE9C39", "#20A47B", "#5A3920")
 ```
 
 ```{r}
-loc_path <- "./data/temp/malo"
-
-temp_data <- NULL
-for (type in c("min", "avg", "max")) {
-    file <- list.files(
-        path = loc_path,
-        full.names = TRUE,
-        pattern = paste0("*", type, ".csv")
-    )
-
-    tmp_df <- read.csv(file, sep = ";", na.strings = ">>")
-    tmp_df <- tmp_df[-ncol(tmp_df)]
-    names(tmp_df) <- c("year", 1:12)
-
-    tmp_df <- tmp_df |>
-        pivot_longer(-year, names_to = "month", values_to = "value") |>
-        add_column(variable = type, .after = "month") |>
-        mutate(
-            date = make_date(year = year, month = month), .before = 1
-        ) |>
-        mutate(month = factor(
-            month.abb[as.integer(month)], levels = month.abb)
-        )
-
-    temp_data <- rbind(temp_data, tmp_df)
-}
-
-temp_data <- arrange(temp_data, date) |>
-    pivot_wider(names_from = "variable", values_from = "value") |>
-    na.omit()
+fname <- "./data/temp/malo.csv"
+daily_data <- read_csv(
+    fname,
+    col_names = c("date", "min", "avg", "max"),
+    skip = 1,
+) |> na.omit()
 ```
 
 ```{r}
-years <- unique(temp_data$year)
+monthly_data <- daily_data |>
+    mutate(year = year(date), month = month(date, label = TRUE)) |>
+    group_by(year, month) |>
+    summarize(min = mean(min), avg = mean(avg), max = mean(max))
+```
 
-baseline <- temp_data |>
-    filter(year <= years[5]) |>
+```{r}
+years <- unique(monthly_data$year)
+
+base_idx <- 10
+baseline <- monthly_data |>
+    filter(year <= years[base_idx]) |>
     group_by(month) |>
     summarize(min = mean(min), avg = mean(avg), max = mean(max))
 
-temp_data |>
+monthly_data |>
     inner_join(baseline, by = "month") |>
     mutate(avg = avg.x - avg.y) |>
     ggplot() +
         geom_tile(aes(x = year, y = fct_rev(month), fill = avg)) +
+        annotate(
+            geom = "rect",
+            xmin = years[1] - 0.5, xmax = years[base_idx] + 0.5,
+            ymin = 12.5, ymax = 0.5,
+            fill = "grey50", alpha = 0.4
+        ) +
         scale_x_continuous(
             breaks = scales::pretty_breaks(),
             expand = c(0, 0)
@@ -86,15 +76,23 @@ temp_data |>
             title = paste0(
                 "Deviation of the average monthly ",
                 "temperature w.r.t. the ",
-                years[1], "-", years[5], " period"
+                years[1], "-", years[base_idx], " period"
             )
         )
+```
 
-temp_data |>
+```{r}
+monthly_data |>
     inner_join(baseline, by = "month") |>
     mutate(diff = (max.x - min.x) - (max.y - min.y)) |>
     ggplot() +
         geom_tile(aes(x = year, y = fct_rev(month), fill = diff)) +
+        annotate(
+            geom = "rect",
+            xmin = years[1] - 0.5, xmax = years[base_idx] + 0.5,
+            ymin = 12.5, ymax = 0.5,
+            fill = "grey50", alpha = 0.4
+        ) +
         scale_x_continuous(
             breaks = scales::pretty_breaks(),
             expand = c(0, 0)
@@ -107,33 +105,43 @@ temp_data |>
             title = paste0(
                 "Deviation of the average monthly thermal ",
                 "excursion w.r.t. the ",
-                years[1], "-", years[5], " period"
+                years[1], "-", years[base_idx], " period"
             )
         )
 ```
 
 ```{r}
-smoothed <- temp_data |>
+# get only "complete" years
+full_years <- monthly_data |>
     group_by(year) |>
-    summarize(temp = mean(avg))
+    filter(n() == 12) |>
+    distinct(year) |>
+    pull()
+
+yearly_data <- daily_data |>
+    mutate(year = year(date)) |>
+    filter(year %in% full_years) |>
+    group_by(year) |>
+    summarize(avg = mean(avg))
 
 # standard linear fit to get prior parameters
-lm_fit <- lm(temp ~ year, data = smoothed)
+lm_fit <- lm(avg ~ year, yearly_data)
 lm_params <- summary(lm_fit)$coefficients[, 1]
 lm_errs <- summary(lm_fit)$coefficients[, 2]
 ```
 ```{r}
 model <- sprintf("
     model {
+        tau <- 1 / sigma^2
+
         for (i in 1:length(year)) {
             mu[i] <- a + b * year[i]
-            temp[i] ~ dnorm(mu[i], tau)
+            avg[i] ~ dnorm(mu[i], tau)
         }
         
         a ~ dnorm(%f, %f)
         b ~ dnorm(%f, %f)
         sigma ~ dexp(0.001)
-        tau <- 1 / sigma^2
     }",
     lm_params[1], 1 / lm_errs[1]^2,
     lm_params[2], 1 / lm_errs[2]^2
@@ -142,7 +150,7 @@ model <- sprintf("
 pars <- c("a", "b", "sigma")
 
 chain <- jags(
-    data = smoothed,
+    data = yearly_data,
     inits = function() list(a = 0, b = 0, sigma = 1),
     parameters.to.save = pars,
     model.file = textConnection(model),
