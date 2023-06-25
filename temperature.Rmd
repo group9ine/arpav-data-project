@@ -29,101 +29,154 @@ my_pal <- c("#EE9C39", "#20A47B", "#5A3920")
 ```
 
 ```{r}
-fname <- "./data/temp/malo.csv"
-daily_data <- read_csv(
-    fname,
-    col_names = c("date", "min", "avg", "max"),
-    skip = 1,
-) |> na.omit()
-```
+get_daily_data <- function(station) {
+    require(readr)
 
-```{r}
-monthly_data <- daily_data |>
-    mutate(year = year(date), month = month(date, label = TRUE)) |>
-    group_by(year, month) |>
-    summarize(min = mean(min), avg = mean(avg), max = mean(max))
-```
+    fname <- paste0("./data/temp/", station, ".csv")
 
-```{r}
-years <- unique(monthly_data$year)
+    read_csv(
+        fname,
+        col_names = c("date", "min", "avg", "max"),
+        skip = 1
+    ) |> na.omit()
+}
 
-base_idx <- 10
-baseline <- monthly_data |>
-    filter(year <= years[base_idx]) |>
-    group_by(month) |>
-    summarize(min = mean(min), avg = mean(avg), max = mean(max))
+get_monthly_data <- function(station) {
+    require(dplyr)
+    require(lubridate)
 
-monthly_data |>
-    inner_join(baseline, by = "month") |>
-    mutate(avg = avg.x - avg.y) |>
-    ggplot() +
-        geom_tile(aes(x = year, y = fct_rev(month), fill = avg)) +
-        annotate(
-            geom = "rect",
-            xmin = years[1] - 0.5, xmax = years[base_idx] + 0.5,
-            ymin = 12.5, ymax = 0.5,
-            fill = "grey50", alpha = 0.4
-        ) +
-        scale_x_continuous(
-            breaks = scales::pretty_breaks(),
-            expand = c(0, 0)
-        ) +
-        scale_fill_gradientn(
-            colours = wesanderson::wes_palette("Zissou1", 10, "continuous")
-        ) +
-        labs(
-            x = "Year", y = "Month", fill = "Deviation (°C)",
-            title = paste0(
-                "Deviation of the average monthly ",
-                "temperature w.r.t. the ",
-                years[1], "-", years[base_idx], " period"
-            )
+    get_daily_data(station) |>
+        mutate(
+            year = year(.data$date),
+            month = month(.data$date, label = TRUE)
+        ) |>
+        group_by(year, month) |>
+        summarize(
+            min = mean(.data$min),
+            avg = mean(.data$avg),
+            max = mean(.data$max)
         )
-```
+}
 
-```{r}
-monthly_data |>
-    inner_join(baseline, by = "month") |>
-    mutate(diff = (max.x - min.x) - (max.y - min.y)) |>
-    ggplot() +
-        geom_tile(aes(x = year, y = fct_rev(month), fill = diff)) +
-        annotate(
-            geom = "rect",
-            xmin = years[1] - 0.5, xmax = years[base_idx] + 0.5,
-            ymin = 12.5, ymax = 0.5,
-            fill = "grey50", alpha = 0.4
-        ) +
-        scale_x_continuous(
-            breaks = scales::pretty_breaks(),
-            expand = c(0, 0)
-        ) +
-        scale_fill_gradientn(
-            colours = wesanderson::wes_palette("Zissou1", 10, "continuous")
-        ) +
-        labs(
-            x = "Year", y = "Month", fill = "Deviation (°C)",
-            title = paste0(
-                "Deviation of the average monthly thermal ",
-                "excursion w.r.t. the ",
-                years[1], "-", years[base_idx], " period"
-            )
+temp_change_heatmaps <- function(station, avg_window) {
+    require(forcats)
+    require(ggplot2)
+    require(scales)
+    require(stringr)
+    require(wesanderson)
+
+    data <- get_monthly_data(station)
+
+    years <- unique(data$year)
+
+    baseline <- data |>
+        filter(.data$year <= years[avg_window]) |>
+        group_by(.data$month) |>
+        summarize(
+            min = mean(.data$min),
+            avg = mean(.data$avg),
+            max = mean(.data$max)
         )
+
+    station_name <- station |>
+        str_split_1("_") |>
+        paste(collapse = " ") |>
+        str_to_title() |>
+        paste("station")
+
+    temperature_plt <- data |>
+        inner_join(baseline, by = "month") |>
+        mutate(avg = .data$avg.x - .data$avg.y) |>
+        ggplot() +
+            geom_tile(
+                aes(x = .data$year, y = fct_rev(.data$month),
+                fill = .data$avg)
+            ) +
+            annotate(
+                geom = "rect",
+                xmin = years[1] - 0.5, xmax = years[avg_window] + 0.5,
+                ymin = 12.5, ymax = 0.5,
+                fill = "grey50", alpha = 0.4
+            ) +
+            scale_x_continuous(
+                breaks = pretty_breaks(),
+                expand = c(0, 0)
+            ) +
+            scale_fill_gradientn(
+                colours = wes_palette("Zissou1", 10, "continuous")
+            ) +
+            labs(
+                x = "Year", y = "Month", fill = "Deviation (°C)",
+                title = paste0(
+                    "Deviation of the average monthly ",
+                    "temperature w.r.t. the ",
+                    years[1], "-", years[avg_window], " period"
+                ),
+                subtitle = station_name
+            )
+
+    excursion_plt <- data |>
+        inner_join(baseline, by = "month") |>
+        mutate(
+            diff = .data$max.x - .data$min.x - .data$max.y + .data$min.y
+        ) |>
+        ggplot() +
+            geom_tile(
+                aes(x = .data$year, y = fct_rev(.data$month),
+                fill = diff)
+            ) +
+            annotate(
+                geom = "rect",
+                xmin = years[1] - 0.5, xmax = years[avg_window] + 0.5,
+                ymin = 12.5, ymax = 0.5,
+                fill = "grey50", alpha = 0.4
+            ) +
+            scale_x_continuous(
+                breaks = pretty_breaks(),
+                expand = c(0, 0)
+            ) +
+            scale_fill_gradientn(
+                colours = wes_palette("Zissou1", 10, "continuous")
+            ) +
+            labs(
+                x = "Year", y = "Month", fill = "Deviation (°C)",
+                title = paste0(
+                    "Deviation of the average monthly thermal ",
+                    "excursion w.r.t. the ",
+                    years[1], "-", years[avg_window], " period"
+                ),
+                subtitle = station_name
+        )
+
+    list(temperature = temperature_plt, excursion = excursion_plt)
+}
 ```
 
 ```{r}
-# get only "complete" years
-full_years <- monthly_data |>
-    group_by(year) |>
-    filter(n() == 12) |>
-    distinct(year) |>
-    pull()
-
-yearly_data <- daily_data |>
-    mutate(year = year(date)) |>
-    filter(year %in% full_years) |>
-    group_by(year) |>
-    summarize(avg = mean(avg))
+temp_change_heatmaps(station = "cavallino-treporti", avg_window = 10)
 ```
+
+```{r}
+get_yearly_data <- function(station) {
+    data <- get_daily_data(station)
+
+    full_years <- data |>
+        mutate(year = year(.data$date), month = month(.data$date)) |>
+        group_by(year, month) |>
+        count() |>
+        group_by(year) |>
+        filter(n() == 12) |>
+        distinct(year) |>
+        pull()
+
+    data |>
+        mutate(year = year(.data$date)) |>
+        filter(year %in% full_years) |>
+        group_by(year) |>
+        summarize(avg = mean(.data$avg))
+}
+```
+
 ```{r}
 lin_model <- "
     model {
@@ -141,46 +194,6 @@ lin_model <- "
 
 lin_pars <- c("a", "b", "sigma")
 
-lin_chain <- R2jags::jags(
-    data = yearly_data,
-    inits = function() {
-        list(
-            a = runif(1, -200, 0),
-            b = runif(1, 0, 1),
-            sigma = runif(1, 0, 1)
-        )
-    },
-    parameters.to.save = lin_pars,
-    model.file = textConnection(lin_model),
-    n.chains = 3,
-    n.iter = 100000,
-    n.burnin = 2000,
-    n.thin = 10,
-    DIC = FALSE
-) |> as.mcmc()
-```
-
-```{r, fig.width = 10, fig.height = 8}
-trace_plt <- mcmc_trace(
-    lin_chain, pars = lin_pars,
-    facet_args = list(nrow = 3, labeller = label_parsed)
-) +
-    facet_text(size = 15) +
-    labs(title = "Traces") +
-    bayesplot::theme_default(base_size = 15, base_family = global_font)
-
-dens_plt <- mcmc_dens_overlay(
-    lin_chain, pars = lin_pars,
-    facet_args = list(nrow = 3, labeller = label_parsed)
-) +
-    facet_text(size = 15) +
-    labs(title = "Densities") +
-    bayesplot::theme_default(base_size = 15, base_family = global_font)
-
-gridExtra::grid.arrange(trace_plt, dens_plt, ncol = 2)
-```
-
-```{r}
 const_model <- "
     model {
         tau <- 1 / sigma^2
@@ -195,37 +208,106 @@ const_model <- "
 
 const_pars <- c("a", "sigma")
 
-const_chain <- R2jags::jags(
-    data = yearly_data,
-    inits = function() {
-        list(a = runif(1, 0, 20), sigma = runif(0, 1))
-    },
-    parameters.to.save = const_pars,
-    model.file = textConnection(const_model),
-    n.chains = 3,
-    n.iter = 100000,
-    n.burnin = 2000,
-    n.thin = 10,
-    DIC = FALSE
-) |> as.mcmc()
+quad_model <- "
+    model {
+        tau <- 1 / sigma^2
+
+        for (i in 1:length(year)) {
+            mu[i] <- a + b * year[i] + c * year[i] * year[i]
+            avg[i] ~ dnorm(mu[i], tau)
+        }
+        
+        a ~ dnorm(0, 1e-6)
+        b ~ dnorm(0, 1e-6)
+        c ~ dnorm(0, 1e-6)
+        sigma ~ dexp(0.0001)
+    }"
+
+quad_pars <- c("a", "b", "c", "sigma")
+
+init_variables <- function(model) {
+    if (model == lin_model) {
+        function() {
+            list(
+                a = runif(1, -200, 0),
+                b = runif(1, 0, 1),
+                sigma = runif(1, 0, 1)
+            )
+        }
+    } else if (model == const_model) {
+        function() {
+            list(
+                a = runif(1, -200, 0),
+                sigma = runif(1, 0, 1)
+            )
+        }
+    } else if (model == quad_model) {
+        function() {
+            list(
+                a = runif(1, -200, 0),
+                b = runif(1, 0, 1),
+                c = runif(1, 0, 1),
+                sigma = runif(1, 0, 1)
+            )
+        }
+    }
+}
+
+regression <- function(station, model, params) {
+    R2jags::jags(
+        data = get_yearly_data(station),
+        inits = init_variables(model),
+        parameters.to.save = params,
+        model.file = textConnection(model),
+        n.chains = 3,
+        n.iter = 100000,
+        n.burnin = 2000,
+        n.thin = 10,
+        DIC = FALSE
+    ) |> coda::as.mcmc()
+}
+
+plot_chains <- function(chain, params) {
+    trace_plt <- mcmc_trace(
+        chain, pars = params,
+        facet_args = list(nrow = length(params), labeller = label_parsed)
+    ) +
+        facet_text(size = 15) +
+        labs(title = "Traces") +
+        bayesplot::theme_default(base_size = 15, base_family = global_font)
+
+    dens_plt <- mcmc_dens_overlay(
+        chain, pars = params,
+        facet_args = list(nrow = length(params), labeller = label_parsed)
+    ) +
+        facet_text(size = 15) +
+        labs(title = "Densities") +
+        bayesplot::theme_default(base_size = 15, base_family = global_font)
+
+    gridExtra::grid.arrange(trace_plt, dens_plt, ncol = 2)
+}
 ```
 
 ```{r}
-trace_plt <- mcmc_trace(
-    const_chain, pars = const_pars,
-    facet_args = list(nrow = 3, labeller = label_parsed)
-) +
-    facet_text(size = 15) +
-    labs(title = "Traces") +
-    bayesplot::theme_default(base_size = 15, base_family = global_font)
+quad_chain <- regression("porto_tolle", quad_model, quad_pars) |>
+    plot_chains(quad_pars)
+```
 
-dens_plt <- mcmc_dens_overlay(
-    const_chain, pars = const_pars,
-    facet_args = list(nrow = 3, labeller = label_parsed)
-) +
-    facet_text(size = 15) +
-    labs(title = "Densities") +
-    bayesplot::theme_default(base_size = 15, base_family = global_font)
+```{r}
+quad_model <- "
+    model {
+        tau <- 1 / sigma^2
 
-gridExtra::grid.arrange(trace_plt, dens_plt, ncol = 2)
+        for (i in 1:length(year)) {
+            mu[i] <- a + b * year[i] + c * year[i] * year[i]
+            avg[i] ~ dnorm(mu[i], tau)
+        }
+        
+        a ~ dnorm(0, 1e-6)
+        b ~ dnorm(0, 1e-6)
+        c ~ dnorm(0, 1e-6)
+        sigma ~ dexp(0.0001)
+    }"
+
+quad_pars <- c("a", "b", "c", "sigma")
 ```
