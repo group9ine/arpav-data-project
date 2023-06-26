@@ -37,7 +37,8 @@ get_daily_data <- function(station) {
     read_csv(
         fname,
         col_names = c("date", "min", "avg", "max"),
-        skip = 1
+        skip = 1,
+        show_col_types = FALSE
     ) |> na.omit()
 }
 
@@ -173,7 +174,11 @@ get_yearly_data <- function(station) {
         mutate(year = year(.data$date)) |>
         filter(year %in% full_years) |>
         group_by(year) |>
-        summarize(avg = mean(.data$avg))
+        summarize(
+            min = mean(.data$min),
+            avg = mean(.data$avg),
+            max = mean(.data$max)
+        )
 }
 ```
 
@@ -390,4 +395,28 @@ mal_rov_corr <- correlation_plot(
 
 mal_rov_corr$cor
 mal_rov_corr$plot
+```
+
+```{r}
+get_period_data <- function(station, interval) {
+    data <- get_yearly_data(station)
+    data <- data[seq(1, nrow(data) - (nrow(data) %% interval)), ]
+    first_year <- data$year[1]
+    last_year <- data$year[nrow(data)]
+
+    data |>
+        mutate(
+            period = cut(
+                .data$year,
+                breaks = seq(first_year, last_year + 1, interval),
+                right = FALSE
+            )
+        ) |>
+        group_by(period) |>
+        summarize(
+            min = mean(.data$min),
+            avg = mean(.data$avg),
+            max = mean(.data$max)
+        )
+}
 ```
