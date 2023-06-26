@@ -186,7 +186,7 @@ lin_model <- "
             mu[i] <- a + b * year[i]
             avg[i] ~ dnorm(mu[i], tau)
         }
-        
+
         a ~ dnorm(0, 1e-6)
         b ~ dnorm(0, 1e-6)
         sigma ~ dexp(0.0001)
@@ -216,7 +216,7 @@ quad_model <- "
             mu[i] <- a + b * year[i] + c * year[i] * year[i]
             avg[i] ~ dnorm(mu[i], tau)
         }
-        
+
         a ~ dnorm(0, 1e-6)
         b ~ dnorm(0, 1e-6)
         c ~ dnorm(0, 1e-6)
@@ -325,7 +325,7 @@ quad_model <- sprintf("
             mu[i] <- a + b * year[i] + c * year[i] * year[i]
             avg[i] ~ dnorm(mu[i], tau)
         }
-        
+
         a ~ dnorm(%e, %e)
         b ~ dnorm(%e, %e)
         c ~ dnorm(%e, %e)
@@ -347,39 +347,47 @@ best_pars <- quad_chain |>
 ```
 
 ```{r}
-correlation_plot <- function(stat1, stat2, name1, name2){
-
+correlation_plot <- function(stat1, stat2) {
     df <- inner_join(stat1, stat2, by = "year", suffix = c(".s1", ".s2"))
-    
-    plot <- ggplot(df, aes(x = avg.s1, y = avg.s2)) +
-            geom_point(aes(colour = year), size = 3) +
-            ggrepel::geom_label_repel(
-                aes(label = year, colour = year),
-                data = \(x) x |> filter(row_number() %% 3 == 1),
-                min.segment.length = 0,
-                box.padding = 0.5
-            ) +
-            labs(
-                x = paste(name1, "temperature (°C)"),
-                y = paste(name2, "temperature (°C)"),
-                colour = "Year",
-                title = paste(
-                    "Comparison of the average yearly temperatures in",
-                    name1, "and", name2
-                )
+
+    name_stat <- function(stat) {
+        stat |> str_split_1("_") |> paste(collapse = " ") |> str_to_title()
+    }
+
+    name1 <- name_stat(stat1)
+    name2 <- name_stat(stat2)
+
+    plot <- ggplot(df, aes(x = .data$avg.s1, y = .data$avg.s2)) +
+        geom_point(aes(colour = .data$year), size = 3) +
+        ggrepel::geom_label_repel(
+            aes(label = .data$year, colour = .data$year),
+            data = \(x) x |> filter(row_number() %% 3 == 1),
+            min.segment.length = 0,
+            box.padding = 0.5
+        ) +
+        labs(
+            x = paste(name1, "temperature (°C)"),
+            y = paste(name2, "temperature (°C)"),
+            colour = "Year",
+            title = paste(
+                "Comparison of the average yearly temperatures in",
+                name1, "and", name2
             )
-      return(list(cor = cor(df$avg.s1, df$avg.s2, method='pearson'), plot = plot))
+        )
+
+    list(
+        cor = cor(df$avg.s1, df$avg.s2, method = "pearson"),
+        plot = plot
+    )
 }
 ```
 
 ```{r}
-name_list <- c("auronzo","castelfranco_veneto","cavallino-treporti",
-               "malo","porto_tolle","roverchiara")
+mal_rov_corr <- correlation_plot(
+    get_yearly_data("malo"),
+    get_yearly_data("roverchiara")
+)
 
-C <- correlation_plot(get_yearly_data("malo"), get_yearly_data("roverchiara"),
-                        "Malo", "Roverchiara")
-C$cor;
-C$plot
+mal_rov_corr$cor
+mal_rov_corr$plot
 ```
-
-
