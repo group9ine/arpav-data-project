@@ -416,6 +416,10 @@ get_period_data <- function(station, interval) {
         ) |>
         group_by(period) |>
         summarize(
+            centre = (
+                as.integer(substr(as.character(unique(period)), 7, 10)) +
+                as.integer(substr(as.character(unique(period)), 2, 5)) - 1
+            ) / 2,
             min = mean(.data$min),
             avg = mean(.data$avg),
             max = mean(.data$max)
@@ -424,24 +428,49 @@ get_period_data <- function(station, interval) {
 ```
 
 ```{r}
+period_regression <- function(data, type) {
+    data <- data[, c("centre", type)]
 
+    lm_fit <- lm(as.formula(paste(type, "~ centre")), data)
+    lm_pars <- summary(lm_fit)$coefficients[, 1]
+    lm_errs <- summary(lm_fit)$coefficients[, 2]
 
-lm_fit <- lm()
+    model <- sprintf("
+        model {
+            tau <- 1 / sigma^2
 
-lin_model <- sprintf("
-    model {
-        tau <- 1 / sigma^2
+            for (i in 1:length(centre)) {
+                mu[i] <- a + b * centre[i]
+                %s[i] ~ dnorm(mu[i], tau)
+            }
 
-        for (i in 1:length(year)) {
-            mu[i] <- a + b * year[i]
-            avg[i] ~ dnorm(mu[i], tau)
-        }
+            a ~ dnorm(%f, %f)
+            b ~ dnorm(%f, %f)
+            sigma ~ dexp(0.0001)
+        }",
+        type,
+        0, 1e-6, 0, 1e-6
+    )
 
-        a ~ dnorm(0, 1e-6)
-        b ~ dnorm(0, 1e-6)
-        sigma ~ dexp(0.0001)
-    }",
+    pars <- c("a", "b", "sigma")
 
+    R2jags::jags(
+        data = data,
+        inits = \() list(a = rnorm(1), b = rnorm(1), sigma = rnorm(1)),
+        parameters.to.save = pars,
+        model.file = textConnection(model),
+        n.chains = 3,
+        n.iter = 100000,
+        n.burnin = 2000,
+        n.thin = 10,
+        DIC = FALSE
+    ) |> coda::as.mcmc()
+}
+```
 
-lin_pars <- c("a", "b", "sigma")
+```{r}
+period_data <- get_period_data("auronzo", 5)
+period_chain <- period_regression(period_data, "avg")
+
+plot_chains(period_chain, lin_pars)
 ```
