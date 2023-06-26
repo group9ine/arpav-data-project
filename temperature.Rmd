@@ -153,7 +153,7 @@ temp_change_heatmaps <- function(station, avg_window) {
 ```
 
 ```{r}
-temp_change_heatmaps(station = "cavallino-treporti", avg_window = 10)
+temp_change_heatmaps(station = "castelfranco_veneto", avg_window = 10)
 ```
 
 ```{r}
@@ -347,25 +347,39 @@ best_pars <- quad_chain |>
 ```
 
 ```{r}
-porto_tolle <- get_yearly_data("porto_tolle")
-auronzo <- get_yearly_data("auronzo")
+correlation_plot <- function(stat1, stat2, name1, name2){
 
-inner_join(porto_tolle, auronzo, by = "year", suffix = c(".pt", ".au")) |>
-    ggplot(aes(x = avg.pt, y = avg.au)) +
-        geom_point(aes(colour = year), size = 3) +
-        ggrepel::geom_label_repel(
-            aes(label = year, colour = year),
-            data = \(x) x |> filter(row_number() %% 3 == 1),
-            min.segment.length = 0,
-            box.padding = 0.5
-        ) +
-        labs(
-            x = "Porto Tolle temperature (°C)",
-            y = "Auronzo temperature (°C)",
-            colour = "Year",
-            title = paste(
-                "Comparison of the average yearly temperatures in",
-                "Porto Tolle and Auronzo"
+    df <- inner_join(stat1, stat2, by = "year", suffix = c(".s1", ".s2"))
+    
+    plot <- ggplot(df, aes(x = avg.s1, y = avg.s2)) +
+            geom_point(aes(colour = year), size = 3) +
+            ggrepel::geom_label_repel(
+                aes(label = year, colour = year),
+                data = \(x) x |> filter(row_number() %% 3 == 1),
+                min.segment.length = 0,
+                box.padding = 0.5
+            ) +
+            labs(
+                x = paste(name1, "temperature (°C)"),
+                y = paste(name2, "temperature (°C)"),
+                colour = "Year",
+                title = paste(
+                    "Comparison of the average yearly temperatures in",
+                    name1, "and", name2
+                )
             )
-        )
+      return(list(cor = cor(df$avg.s1, df$avg.s2, method='pearson'), plot = plot))
+}
 ```
+
+```{r}
+name_list <- c("auronzo","castelfranco_veneto","cavallino-treporti",
+               "malo","porto_tolle","roverchiara")
+
+C <- correlation_plot(get_yearly_data("malo"), get_yearly_data("roverchiara"),
+                        "Malo", "Roverchiara")
+C$cor;
+C$plot
+```
+
+
