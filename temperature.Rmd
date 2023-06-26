@@ -353,7 +353,12 @@ best_pars <- quad_chain |>
 
 ```{r}
 correlation_plot <- function(stat1, stat2) {
-    df <- inner_join(stat1, stat2, by = "year", suffix = c(".s1", ".s2"))
+    df <- inner_join(
+        get_yearly_data(stat1),
+        get_yearly_data(stat2),
+        by = "year",
+        suffix = c(".s1", ".s2")
+    )
 
     name_stat <- function(stat) {
         stat |> str_split_1("_") |> paste(collapse = " ") |> str_to_title()
@@ -388,10 +393,7 @@ correlation_plot <- function(stat1, stat2) {
 ```
 
 ```{r}
-mal_rov_corr <- correlation_plot(
-    get_yearly_data("malo"),
-    get_yearly_data("roverchiara")
-)
+mal_rov_corr <- correlation_plot("malo", "roverchiara")
 
 mal_rov_corr$cor
 mal_rov_corr$plot
@@ -419,4 +421,27 @@ get_period_data <- function(station, interval) {
             max = mean(.data$max)
         )
 }
+```
+
+```{r}
+
+
+lm_fit <- lm()
+
+lin_model <- sprintf("
+    model {
+        tau <- 1 / sigma^2
+
+        for (i in 1:length(year)) {
+            mu[i] <- a + b * year[i]
+            avg[i] ~ dnorm(mu[i], tau)
+        }
+
+        a ~ dnorm(0, 1e-6)
+        b ~ dnorm(0, 1e-6)
+        sigma ~ dexp(0.0001)
+    }",
+
+
+lin_pars <- c("a", "b", "sigma")
 ```
