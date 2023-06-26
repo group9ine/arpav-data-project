@@ -401,7 +401,8 @@ mal_rov_corr$plot
 
 ```{r}
 get_period_data <- function(station, interval) {
-    data <- get_yearly_data(station)
+    data <- get_yearly_data(station) |>
+        filter(.data$year > 1980)
     data <- data[seq(1, nrow(data) - (nrow(data) %% interval)), ]
     first_year <- data$year[1]
     last_year <- data$year[nrow(data)]
@@ -449,14 +450,15 @@ period_regression <- function(data, type) {
             sigma ~ dexp(0.0001)
         }",
         type,
-        0, 1e-6, 0, 1e-6
+        lm_pars[1], 1 / lm_errs[1]^2,
+        lm_pars[2], 1 / lm_errs[2]^2
     )
 
     pars <- c("a", "b", "sigma")
 
     R2jags::jags(
         data = data,
-        inits = \() list(a = rnorm(1), b = rnorm(1), sigma = rnorm(1)),
+        inits = \() list(a = rnorm(1), b = rnorm(1), sigma = runif(1)),
         parameters.to.save = pars,
         model.file = textConnection(model),
         n.chains = 3,
@@ -469,8 +471,75 @@ period_regression <- function(data, type) {
 ```
 
 ```{r}
-period_data <- get_period_data("auronzo", 5)
+period_length <- 5
+period_data <- get_period_data("castelfranco_veneto", period_length)
 period_chain <- period_regression(period_data, "avg")
 
 plot_chains(period_chain, lin_pars)
+```
+
+Data from SNPA:
+
+> La stima aggiornata del rateo di variazione della temperatura media dal
+> 1981 al 2019 è di +0,38 ± 0,05 °C/10 anni; il rateo di variazione della
+> temperatura massima (+0,42 ± 0,06 °C/10 anni) è maggiore di quello della
+> temperatura minima (+0,34 ± 0,04 °C/10 anni).
+
+```{r}
+snpa <- tibble(
+    type = c("min", "avg", "max"),
+    mu = c(0.34, 0.38, 0.42),
+    sigma = c(0.04, 0.05, 0.06)
+)
+
+snpa_comparison <- function(chain, st_name, type, interval) {
+    chain_pars <- chain |>
+        tidybayes::tidy_draws() |>
+        select("b") |>
+        summarize(mu = mean(.data$b), sigma = sd(.data$b))
+
+    mu_d <- chain_pars$mu - snpa$mu[snpa$type == type] / 10
+    sigma_d <- sqrt(
+        chain_pars$sigma^2 + (snpa$sigma[snpa$type == type] / 10)^2
+    )
+
+    cred <- qnorm(c(0.025, 0.975), mu_d, sigma_d)
+
+    x <- mu_d + seq(-5 * sigma_d, 5 * sigma_d, length.out = 1000)
+
+    tibble(x = x, y = dnorm(x, mu_d, sigma_d)) |>
+        ggplot(aes(.data$x, .data$y)) +
+            geom_area(fill = my_pal[1], alpha = 0.5) +
+            geom_area(
+                data = \(x) x |> filter(x < cred[1]),
+                fill = my_pal[3], alpha = 0.5
+            ) +
+            geom_area(
+                data = \(x) x |> filter(x > cred[2]),
+                fill = my_pal[3], alpha = 0.5
+            ) +
+            geom_vline(
+                xintercept = 0, colour = my_pal[2], linewidth = 0.8
+            ) +
+            coord_cartesian(expand = FALSE) +
+            labs(
+                x = "Difference of the posterior means",
+                y = "Posterior distribution",
+                title = paste(
+                    "Compatibility test of the",
+                    ifelse(
+                        type == "min", "minimum",
+                        ifelse(type == "max", "maximum", "average")
+                    ),
+                    "temperatures’ yearly increase rates"
+                ),
+                subtitle = paste(
+                    "Difference between", st_name, "and SNPA data"
+                )
+            )
+}
+```
+
+```{r}
+snpa_comparison(period_chain, "Castelfranco Veneto", "avg", period_length)
 ```
