@@ -57,7 +57,7 @@ ggplot() +
     geom_sf(aes(fill = province), data = veneto_sf) +
     geom_sf(data = stations_sf) +
     coord_sf() +
-    labs(x = "Latitude", y = "Longitude", fill = "Province")
+    labs(x = "Longitude", y = "Latitude", fill = "Province")
 
 full_data <- enframe(raw_data, name = "station", value = "dump") |>
     unnest(dump) |>
@@ -106,4 +106,63 @@ full_data <- enframe(raw_data, name = "station", value = "dump") |>
             right_join(mins, avgs, by = c("year", "month")) |>
                 left_join(maxs, by = c("year", "month"))
         }
-    )
+    ) |>
+    drop_na()
+
+station_corr <- function(stat) {
+    require(dplyr)
+    require(purrr)
+
+    # keep only full years
+    full_data <- full_data |>
+        group_by(.data$station, .data$year) |>
+        filter(n() == 12) |>
+        ungroup()
+
+    stat_data <- full_data |>
+        filter(.data$station == stat) |>
+        group_by(.data$year) |>
+        summarize(
+            min = mean(.data$min),
+            avg = mean(.data$avg),
+            max = mean(.data$max)
+        )
+
+    # get years when the chosen station was always operational
+    stat_years <- full_data |>
+        filter(.data$station == stat) |>
+        distinct(.data$year) |>
+        unlist()
+
+    # compute correlation with compatible stations
+    compatibles <- full_data |>
+        group_by(.data$station) |>
+        distinct(.data$year) |>
+        # operational for the same number of years
+        filter(n() == length(stat_years)) |>
+        # and the years should match too
+        filter(.data$year == stat_years) |>
+        distinct(.data$station) |>
+        unlist()
+
+    map_dfr(
+        compatibles,
+        function(s) {
+            s_data <- full_data |>
+                filter(.data$station == s) |>
+                group_by(.data$year) |>
+                summarize(
+                    min = mean(.data$min),
+                    avg = mean(.data$avg),
+                    max = mean(.data$max)
+                )
+
+            tibble(
+                min = cor(stat_data$min, s_data$min),
+                avg = cor(stat_data$avg, s_data$avg),
+                max = cor(stat_data$max, s_data$max)
+            )
+        }
+    ) |>
+        mutate(station = compatibles, .before = 1)
+}
