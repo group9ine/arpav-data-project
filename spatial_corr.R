@@ -1,5 +1,6 @@
 library(tidyverse)
 library(sf)
+theme_set(theme_minimal(base_size = 16, base_family = "Roboto Condensed"))
 
 data_path <- "./data/monthly/"
 file_names <- list.files(data_path)
@@ -42,16 +43,67 @@ stations_sf <- raw_data |>
 
 maps_folder <- "./data/maps/province"
 select_veneto <- sprintf("
-    SELECT shape_area
+    SELECT DEN_PROV + DEN_CM AS province
     FROM %s
     WHERE DEN_PROV IN ('Belluno', 'Padova', 'Rovigo',
                        'Treviso', 'Verona', 'Vicenza')
        OR DEN_CM = 'Venezia'",
     st_layers(maps_folder)$name[1]
 )
-veneto_sf <- st_read(maps_folder, query = select_veneto)
+veneto_sf <- st_read(maps_folder, query = select_veneto) |>
+    mutate(province = factor(str_replace(province, "-", "")))
 
 ggplot() +
-    geom_sf(data = veneto_sf) +
+    geom_sf(aes(fill = province), data = veneto_sf) +
     geom_sf(data = stations_sf) +
-    coord_sf()
+    coord_sf() +
+    labs(x = "Latitude", y = "Longitude", fill = "Province")
+
+full_data <- enframe(raw_data, name = "station", value = "dump") |>
+    unnest(dump) |>
+    group_by(station) |>
+    group_modify(
+        function(x, y) {
+            mins <- x$dump[seq(
+                grep("^Parametro Temperatura.*minime", x$dump) + 5,
+                grep("valore medio delle minime", x$dump) - 3
+            )]
+            mins <- read.csv(
+                text = mins,
+                sep = ";", dec = ".",
+                header = FALSE, na.strings = ">>",
+                col.names = c("year", month.abb, "yavg")
+            ) |>
+                select(-yavg) |>
+                pivot_longer(-year, names_to = "month", values_to = "min")
+
+            avgs <- x$dump[seq(
+                grep("^Parametro Temperatura.*medie", x$dump) + 5,
+                grep("valore medio delle medie", x$dump) - 3
+            )]
+            avgs <- read.csv(
+                text = avgs,
+                sep = ";", dec = ".",
+                header = FALSE, na.strings = ">>",
+                col.names = c("year", month.abb, "yavg")
+            ) |>
+                select(-yavg) |>
+                pivot_longer(-year, names_to = "month", values_to = "avg")
+
+            maxs <- x$dump[seq(
+                grep("^Parametro Temperatura.*massime", x$dump) + 5,
+                grep("valore medio delle massime", x$dump) - 3
+            )]
+            maxs <- read.csv(
+                text = maxs,
+                sep = ";", dec = ".",
+                header = FALSE, na.strings = ">>",
+                col.names = c("year", month.abb, "yavg")
+            ) |>
+                select(-yavg) |>
+                pivot_longer(-year, names_to = "month", values_to = "max")
+
+            right_join(mins, avgs, by = c("year", "month")) |>
+                left_join(maxs, by = c("year", "month"))
+        }
+    )
