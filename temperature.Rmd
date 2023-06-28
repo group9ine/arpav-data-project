@@ -543,3 +543,169 @@ snpa_comparison <- function(chain, st_name, type, interval) {
 ```{r}
 snpa_comparison(period_chain, "Castelfranco Veneto", "avg", period_length)
 ```
+```{r}
+#FORECAST
+#install.packages('forecast')
+library(forecast)
+```
+```{r}
+#DIFF DATASET
+
+get_diff_data <- function(station){
+  get_yearly_data(station) |>
+    reframe(
+      year = year,
+      diff_avg = c(0,diff(avg)),
+      diff_min = c(0,diff(min)),
+      diff_max = c(0,diff(max))
+    ) |>
+    tail(-1)
+    
+}
+
+forecast_prediction <- function(data_type, station, pred_years, interv=5){
+  
+  if(data_type == "diff"){
+    df <- get_diff_data(station)
+    time_series <- ts(
+      data = df$diff_avg,
+      frequency = 1,
+      start = c(df$year[1])
+    )
+    aa <- Arima(time_series, order = c(5,0,5))
+    print(aa)
+    fc <- forecast(aa, level = c(95), h = pred_years)
+  }
+  
+  else if(data_type == "monthly"){
+    df <- get_monthly_data(station)
+    time_series <- ts(
+      data = df$avg,
+      frequency = 12,
+      start = c(df$year,as.numeric(df$month[1]))
+    )
+    aa <- Arima(time_series, order = c(3,0,1), seasonal=c(0,1,2), lambda = 0)
+    print(aa)
+    fc <- forecast(aa, level = c(95), h = pred_years*12)
+  }
+  
+  else if(data_type == "yearly"){
+    df <- get_yearly_data(station)
+    time_series <- ts(
+      data = df$avg,
+      frequency = 1,
+      start = c(df$year[1])
+    )
+    aa <- Arima(time_series, order = c(3,1,4))
+    print(aa)
+    #aa <- auto.arima(time_series)
+    fc <- forecast(aa, level = c(95), h = pred_years)
+  }
+  
+  else if(data_type == "period"){
+    df <- get_period_data(station, interv)
+    time_series <- ts(
+      data = df$avg,
+      frequency = 1/interv,
+      start = c(df$centre[1])
+    )
+    aa <- Arima(time_series, order = c(3,1,3))
+    print(aa)
+    fc <- forecast(aa, level = c(95), h = as.integer(pred_years/interv))
+  }
+   
+  gridExtra::grid.arrange(
+                           autoplot(time_series) + theme_bw(base_size = 8) +
+                             labs(xlab = "time",
+                                  ylab = paste(data_type, "temperature trend"),
+                                  title = "time series"),
+                           ggAcf(time_series) + theme_bw(base_size = 8) +
+                             labs(xlab = "lag",
+                                  ylab = "acf",
+                                  title = "acf of the time series"),
+                           ggAcf(aa$residuals) +theme_bw(base_size = 8) +
+                             labs(xlab = "lag",
+                                  ylab = "acf",
+                                  title = "acf of the residuals"),
+                           autoplot(fc) + theme_bw(base_size = 8) +
+                             labs(xlab = "time",
+                                  ylab = paste(data_type, "temperature trend"),
+                                  title = "forecast of the time series"),
+                           ncol = 2
+                          )
+   
+   return(fc)
+  
+}
+
+diff_unrolling <- function(stat, py){
+  
+  malo_pred <- forecast_prediction(data_type = "diff", station = stat,
+                             pred_years = py)
+  
+  start_year <- get_yearly_data(stat)$year[length(get_yearly_data(stat)$year)]
+  start_temp <- get_yearly_data(stat)$avg[length(get_yearly_data(stat)$avg)]
+  pred_df <- data.frame( x = seq(start_year+1, start_year+py),
+                   y = start_temp + cumsum(malo_pred$mean)
+                 )
+  
+  ggplot(data = get_yearly_data(stat)) + geom_line(aes(x = year, y = avg)) +
+    geom_line(data = pred_df, aes(x = x, y = y), col = my_pal[1], linewidth = 2) +
+    labs(xlab = "year", ylab = "avg temperature", title = "avg temperature prevision")
+  
+}
+
+diff_unrolling("auronzo", 15)
+```
+
+
+```{r}
+const_model <- "
+    model {
+        tau <- 1 / sigma^2
+
+        for (i in 1:length(year)) {
+            diff_avg[i] ~ dnorm(a, tau);
+        }
+
+        a ~ dnorm(0.04, 100)
+        sigma ~ dexp(0.0001);
+    }"
+
+
+diff_chain <- R2jags::jags(
+        data = get_diff_data("auronzo"),
+        inits = function() {
+            list(
+                a = runif(1, -200, 0),
+                sigma = runif(1, 0, 1)
+            )
+            },
+        parameters.to.save = const_pars,
+        model.file = textConnection(const_model),
+        n.chains = 3,
+        n.iter = 100000,
+        n.burnin = 2000,
+        n.thin = 10,
+        DIC = FALSE
+    ) |> coda::as.mcmc()
+
+plot_chains(diff_chain, const_pars)
+
+
+const_diff <- do.call(rbind.data.frame, diff_chain)
+sig_level <- quantile(const_diff$a, probs = 0.05)
+
+ggplot(const_diff) +
+    geom_density(aes(a), colour = my_pal[1], fill = my_pal[1], alpha = 0.5) +
+    geom_area(
+        aes(x, y),
+        data = tibble(
+            x = density(const_diff$a, from = -0.5, to = sig_level)$x,
+            y = density(const_diff$a, from = -0.5, to = sig_level)$y),
+        colour = my_pal[3], fill = my_pal[3], alpha = 0.5
+    ) +
+    geom_vline(xintercept = 0, colour = my_pal[2], linewidth = 0.8) +
+    geom_vline(xintercept = 0.04) +
+    coord_cartesian(expand = FALSE)
+```
