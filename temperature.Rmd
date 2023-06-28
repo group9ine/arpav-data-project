@@ -32,7 +32,7 @@ my_pal <- wesanderson::wes_palette("Zissou1", 5)[c(1, 3, 5)]
 get_daily_data <- function(station) {
     require(readr)
 
-    fname <- paste0("./data/temp/", station, ".csv")
+    fname <- paste0("./data/daily/", station, ".csv")
 
     read_csv(
         fname,
@@ -543,6 +543,7 @@ snpa_comparison <- function(chain, st_name, type, interval) {
 ```{r}
 snpa_comparison(period_chain, "Castelfranco Veneto", "avg", period_length)
 ```
+
 ```{r}
 #FORECAST
 #install.packages('forecast')
