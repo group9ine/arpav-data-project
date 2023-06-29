@@ -50,12 +50,6 @@ select_veneto <- sprintf("
        OR DEN_CM = 'Venezia'",
     st_layers(maps_folder)$name[1]
 )
-#select_veneto <- sprintf("
-#    SELECT DEN_REG AS region
-#    FROM %s
-#    WHERE DEN_REG = 'Veneto'",
-#    st_layers(maps_folder)$name[1]
-#)
 veneto_sf <- st_read(maps_folder, query = select_veneto) |>
     mutate(province = factor(str_replace(province, "-", "")))
 veneto_sf <- st_transform(veneto_sf, 4326)
