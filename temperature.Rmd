@@ -13,7 +13,7 @@ output:
 ---
 
 ```{r setup, include = FALSE}
-knitr::opts_chunk$set(message = FALSE, warnings = FALSE, dev = "svg")
+knitr::opts_chunk$set(message = FALSE, warning = FALSE, dev = "svg")
 ```
 
 In this project, we will examine temperature data coming from ARPAV (Agenzia Regionale per la Protezione dell'Ambiente - Veneto) stations over the Veneto region.
@@ -42,7 +42,7 @@ increase in temperature, compatibly with the climate change.
 
 # Data import and pre-processing
 
-```{r, echo = FALSE}
+```{r}
 library(tidyverse)
 library(R2jags)
 library(bayesplot)
@@ -530,11 +530,14 @@ Let's start with the linear model.
 
 ```{r}
 lin_chain <- regression("malo", lin_model, lin_pars)
-summary(lin_chain)
 
 lin_mcmc <- as.mcmc(lin_chain)
-
+summary(lin_mcmc)
+```
+```{r, fig.width = 9, fig.height = 9}
 plot_chains(lin_mcmc, lin_pars)
+```
+```{r, fig.width = 10, fig.height = 6}
 gridExtra::grid.arrange(
     plot_posteriors(lin_mcmc, "a"),
     plot_posteriors(lin_mcmc, "b"),
@@ -555,9 +558,9 @@ Let’s proceed with the other two models, the constant regression first.
 
 ```{r}
 const_chain <- regression("malo", const_model, const_pars)
-summary(const_chain)
 
 const_mcmc <- as.mcmc(const_chain)
+summary(const_mcmc)
 
 plot_chains(const_mcmc, const_pars)
 gridExtra::grid.arrange(
@@ -574,7 +577,7 @@ regression works better (see later).
 The `a` coefficient is in good agreement with the overall mean of the
 fitted temperatures, as it should be.
 
-```{r, echo = FALSE}
+```{r}
 get_yearly_data("malo") |>
     summarize(mean = mean(avg), sd = sd(avg)) |>
     mutate_if(is.numeric, format, digits = 3) |>
@@ -596,8 +599,14 @@ plot_regression("malo", const_chain, const_pars)
 quad_chain <- regression("malo", quad_model, quad_pars)
 
 quad_mcmc <- as.mcmc(quad_chain)
+summary(quad_mcmc)
+```
 
+```{r, fig.width = 10, fig.height = 10}
 plot_chains(quad_mcmc, quad_pars)
+```
+
+```{r}
 gridExtra::grid.arrange(
     plot_posteriors(quad_mcmc, "a"),
     plot_posteriors(quad_mcmc, "b"),
@@ -651,6 +660,14 @@ quad_model_2 <- sprintf("
 quad_chain_2 <- regression("malo", quad_model_2, quad_pars)
 
 quad_mcmc_2 <- as.mcmc(quad_chain_2)
+summary(quad_mcmc_2)
+```
+
+```{r, fig.width = 10, fig.height = 10}
+plot_chains(quad_mcmc_2, quad_pars)
+```
+
+```{r}
 gridExtra::grid.arrange(
     plot_posteriors(quad_mcmc_2, "a"),
     plot_posteriors(quad_mcmc_2, "b"),
@@ -694,7 +711,7 @@ deviance needs to be penalized.
 get_dic <- \(chain) chain$BUGSoutput$DIC
 
 tribble(
-    ~ model, ~ DIC,
+    ~ Model, ~ DIC,
     "Constant", format(get_dic(const_chain), digits = 3),
     "Linear", format(get_dic(lin_chain), digits = 3),
     "Quadratic", format(get_dic(quad_chain), digits = 3)
@@ -782,7 +799,7 @@ correlation_plot <- function(stat1, stat2) {
 To give an example, let’s check Porto Tolle and Roverchiara, two
 low-altitude locations.
 
-```{r}
+```{r, fig.width = 10, fig.height = 7}
 por_rov_corr <- correlation_plot("porto_tolle", "roverchiara")
 
 por_rov_corr$cor
@@ -800,7 +817,7 @@ in the last chapter.
 Now let’s try swapping Porto Tolle for a mountainous location, Agordo. We
 expect the scatterplot to widen at least a little bit.
 
-```{r}
+```{r, fig.width = 10, fig.height = 7}
 aur_rov_corr <- correlation_plot("auronzo", "roverchiara")
 
 aur_rov_corr$cor
@@ -971,16 +988,23 @@ period_length <- 5
 period_data <- get_period_data("auronzo", period_length)
 period_chain <- period_regression(period_data, "avg")
 period_mcmc <- as.mcmc(period_chain)
+summary(period_mcmc)
+```
 
+```{r, fig.width = 10, fig.height = 10}
 plot_chains(period_mcmc, lin_pars)
+```
 
+```{r, fig.width = 10, fig.height = 7}
 gridExtra::grid.arrange(
     plot_posteriors(period_mcmc, "a"),
     plot_posteriors(period_mcmc, "b"),
     plot_posteriors(period_mcmc, "sigma"),
-    ncol = 2
+    ncol = 3
 )
+```
 
+```{r}
 plot_period_regression("auronzo", "avg", period_chain, period_length)
 ```
 
@@ -1175,35 +1199,17 @@ forecast_prediction <- function(
 
     fc_plt <- gridExtra::grid.arrange(
         autoplot(time_series) +
-            theme_minimal(base_size = 8, base_family = global_font) +
             labs(
-                x = "Time",
-                y = paste(
-                    ifelse(
-                        data_type == "min", "Minimum",
-                        ifelse(data_type == "avg", "Average", "Maximum")
-                    ),
-                    "temperatures (°C)"
-                ),
+                x = "Time", y = "Temperatures (°C)",
                 title = "Time series"
             ),
         ggAcf(time_series) +
-            theme_minimal(base_size = 8, base_family = global_font) +
             labs(x = "Lag", y = "ACF", title = "ACF of the time series"),
         ggAcf(aa$residuals) +
-            theme_minimal(base_size = 8, base_family = global_font) +
             labs(x = "Lag", y = "ACF", title = "ACF of the residuals"),
         autoplot(fc) +
-            theme_minimal(base_size = 8, base_family = global_font) +
             labs(
-                x = "Time",
-                y = paste(
-                    ifelse(
-                        data_type == "min", "Minimum",
-                        ifelse(data_type == "avg", "Average", "Maximum")
-                    ),
-                    "temperatures (°C)"
-                ),
+                x = "Time", y = "Temperatures (°C)",
                 title = "Time series plus forecast"
             ),
         ncol = 2
@@ -1213,13 +1219,12 @@ forecast_prediction <- function(
 }
 ```
 
-```{r}
-forecast_prediction("diff", "malo", 10)$plot
+```{r, fig.width = 10, fig.height = 9}
 forecast_prediction("yearly", "malo", 10)$plot
 forecast_prediction("period", "malo", 10)$plot
 ```
 
-```{r}
+```{r, fig.width = 10, fig.height = 7}
 diff_unrolling <- function(stat, py) {
     malo_pred <- forecast_prediction(
         data_type = "diff", station = stat, pred_years = py
@@ -1366,8 +1371,8 @@ full_data <- enframe(raw_data, name = "station", value = "dump") |>
     drop_na()
 ```
 
-Also, we need a map of Veneto: we used one from the (ISTAT
-website)[https://www.istat.it/it/archivio/222527] with
+Also, we need a map of Veneto: we used one from the
+[ISTAT website](https://www.istat.it/it/archivio/222527) with
 the province boundaries.
 
 ```{r}
@@ -1518,13 +1523,6 @@ plot_spatial_corr <- function(st_name, type) {
                 aes(x = .data$lon, y = .data$lat, fill = .data$var1.pred)
             ) +
             geom_sf(data = veneto_sf, fill = NA, colour = "black") +
-            geom_sf_text(
-                aes(label = .data$station),
-                data = stations_sf |> filter(.data$station == st_name),
-                colour = "firebrick",
-                nudge_x = 0.125,
-                nudge_y = 0.03
-            ) +
             geom_sf(
                 data = stations_sf |> filter(.data$station == st_name),
                 colour = "firebrick",
@@ -1532,7 +1530,7 @@ plot_spatial_corr <- function(st_name, type) {
             ) +
             geom_sf(
                 data = stations_sf |> filter(.data$station != st_name),
-                size = 0.5
+                size = 1
             ) +
             scale_fill_viridis_c() +
             coord_sf() +
@@ -1554,11 +1552,96 @@ plot_spatial_corr <- function(st_name, type) {
 }
 ```
 
-```{r}
+```{r, fig.width = 11, fig.height = 9}
 plot_spatial_corr("Auronzo", "avg")
 plot_spatial_corr("Castelfranco Veneto", "avg")
 plot_spatial_corr("Cavallino Treporti", "avg")
 plot_spatial_corr("Malo", "avg")
 plot_spatial_corr("Porto Tolle - Pradon", "avg")
 plot_spatial_corr("Roverchiara", "avg")
+```
+
+## Differences in the temperature increase
+For this second analysis we will look at how the rising temperature trend
+in the period 1994–2022 varies across the stations. In practice, we will
+plot, with the same methods described before, the slope of the linear fit
+(a simple one with `lm`) of the yearly temperatures from each station.
+
+```{r}
+yearly_fits <- full_data |>
+    group_by(station, year) |>
+    # filter only full years
+    filter(n() == 12) |>
+    summarize(min = mean(min), avg = mean(avg), max = mean(max)) |>
+    # keep only stations that were always operational
+    filter(n() == length(1994:2022)) %>%
+    # perform the linear fits
+    do(
+        min = lm(min ~ year, data = .) |>
+            summary() |>
+            coefficients() %>%
+            .[2, 1],
+        avg = lm(avg ~ year, data = .) |>
+            summary() |>
+            coefficients() %>%
+            .[2, 1],
+        max = lm(max ~ year, data = .) |>
+            summary() |>
+            coefficients() %>%
+            .[2, 1]
+    ) |>
+    unnest(min:max)
+
+# add station coordinates
+yearly_fits <- yearly_fits |>
+    mutate(
+        coords = stations_sf |>
+            filter(station %in% unique(yearly_fits$station)) |>
+            pull(geometry),
+        .after = 1
+    ) |>
+    st_as_sf(sf_column_name = "coords")
+```
+```{r}
+plot_spatial_trend <- function(type) {
+    require(gstat)
+
+    idw(
+        formula = as.formula(paste(type, " ~ 1")),
+        locations = yearly_fits,
+        newdata = veneto_grid,
+        idp = 2
+    ) |>
+        mutate(
+            lon = unlist(map(.data$geometry, 1)),
+            lat = unlist(map(.data$geometry, 2))
+        ) |>
+        ggplot() +
+            geom_raster(
+                aes(x = .data$lon, y = .data$lat, fill = .data$var1.pred)
+            ) +
+            geom_sf(data = veneto_sf, fill = NA, colour = "black") +
+            geom_sf(data = stations_sf, size = 1) +
+            scale_fill_viridis_c() +
+            coord_sf() +
+            labs(
+                x = "Longitude", y = "Latitude",
+                fill = "Increase (°C/year)",
+                title = paste(
+                    "Yearly increase in the",
+                    ifelse(
+                        type == "min", "minimum",
+                        ifelse(type == "avg", "average", "maximum")
+                    ),
+                    "temperatures across Veneto"
+                ),
+                subtitle = "in the 1994–2022 period"
+            )
+}
+```
+
+```{r, fig.width = 11, fig.height = 9}
+plot_spatial_trend("min")
+plot_spatial_trend("avg")
+plot_spatial_trend("max")
 ```
