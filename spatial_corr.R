@@ -41,23 +41,23 @@ stations_sf <- raw_data |>
     set_names("station", "lon", "lat") |>
     st_as_sf(coords = c("lon", "lat"), crs = st_crs(4326))
 
-maps_folder <- "./data/maps/regioni"
-#select_veneto <- sprintf("
-#    SELECT DEN_PROV + DEN_CM AS province
-#    FROM %s
-#    WHERE DEN_PROV IN ('Belluno', 'Padova', 'Rovigo',
-#                       'Treviso', 'Verona', 'Vicenza')
-#       OR DEN_CM = 'Venezia'",
-#    st_layers(maps_folder)$name[1]
-#)
+maps_folder <- "./data/maps/province"
 select_veneto <- sprintf("
-    SELECT DEN_REG AS region
+    SELECT DEN_PROV + DEN_CM AS province
     FROM %s
-    WHERE DEN_REG = 'Veneto'",
+    WHERE DEN_PROV IN ('Belluno', 'Padova', 'Rovigo',
+                       'Treviso', 'Verona', 'Vicenza')
+       OR DEN_CM = 'Venezia'",
     st_layers(maps_folder)$name[1]
 )
-veneto_sf <- st_read(maps_folder, query = select_veneto)
-    #mutate(province = factor(str_replace(province, "-", "")))
+#select_veneto <- sprintf("
+#    SELECT DEN_REG AS region
+#    FROM %s
+#    WHERE DEN_REG = 'Veneto'",
+#    st_layers(maps_folder)$name[1]
+#)
+veneto_sf <- st_read(maps_folder, query = select_veneto) |>
+    mutate(province = factor(str_replace(province, "-", "")))
 veneto_sf <- st_transform(veneto_sf, 4326)
 
 ggplot() +
@@ -203,20 +203,122 @@ ggplot() +
 
 # IDW
 library(gstat)
-library(automap)
+
+corr_sf <- station_corr("Malo") |> select(avg, coords)
+
+veneto_grid <- st_make_grid(veneto_sf, n = 100, what = "corners")
+veneto_grid <- veneto_grid[veneto_sf]
 
 corr_idw <- idw(
     formula = avg ~ 1,
     locations = corr_sf,
     newdata = veneto_grid,
-    idp = 1
+    idp = 2
 )
+
+corr_idw |>
+    mutate(
+        lon = unlist(map(geometry, 1)),
+        lat = unlist(map(geometry, 2))
+    ) |>
+    ggplot() +
+        geom_raster(aes(x = lon, y = lat, fill = var1.pred)) +
+        geom_sf(data = veneto_sf, fill = NA, colour = "black") +
+        geom_sf_text(
+            aes(label = station),
+            data = stations_sf |>
+                filter(station == "Malo"),
+            colour = "firebrick",
+            nudge_x = 0.125,
+            nudge_y = 0.03
+        ) +
+        geom_sf(
+            data = stations_sf |>
+                filter(station == "Malo"),
+            colour = "firebrick",
+            size = 3
+        ) +
+        geom_sf(
+            data = stations_sf |>
+                filter(station != "Malo"),
+            size = 0.5
+        ) +
+        scale_fill_viridis_c() +
+        coord_sf() +
+        labs(
+            x = "Longitude", y = "Latitude",
+            fill = "Correlation",
+            title = paste(
+                "Correlation with the temperature records in",
+                "Malo", "across Veneto"
+            )
+        )
+
+yearly_fits <- full_data |>
+    group_by(station, year) |>
+    # filter only full years
+    filter(n() == 12) |>
+    summarize(min = mean(min), avg = mean(avg), max = mean(max)) |>
+    # keep only stations that were always operational
+    filter(n() == length(1994:2022)) %>%
+    # perform the linear fits
+    do(
+        min = lm(min ~ year, data = .) |>
+            summary() |>
+            coefficients() %>%
+            .[2, 1],
+        avg = lm(avg ~ year, data = .) |>
+            summary() |>
+            coefficients() %>%
+            .[2, 1],
+        max = lm(max ~ year, data = .) |>
+            summary() |>
+            coefficients() %>%
+            .[2, 1]
+    ) |>
+    unnest(min:max)
+
+# add station coordinates
+yearly_fits <- yearly_fits |>
+    mutate(
+        coords = stations_sf |>
+            filter(station %in% unique(yearly_fits$station)) |>
+            pull(geometry),
+        .after = 1
+    ) |>
+    st_as_sf(sf_column_name = "coords")
+
+idw(
+    formula = avg ~ 1,
+    locations = yearly_fits,
+    newdata = veneto_grid,
+    idp = 2
+) |>
+    mutate(
+        lon = unlist(map(geometry, 1)),
+        lat = unlist(map(geometry, 2))
+    ) |>
+    ggplot() +
+        geom_raster(aes(x = lon, y = lat, fill = var1.pred)) +
+        geom_sf(data = veneto_sf, fill = NA, colour = "black") +
+        geom_sf(data = stations_sf, size = 0.5) +
+        scale_fill_viridis_c() +
+        coord_sf() +
+        labs(
+            x = "Longitude", y = "Latitude",
+            fill = "Increase (°C/year)",
+            title = paste(
+                "Yearly increase in the average temperatures",
+                "across Veneto"
+            ),
+            subtitle = "in the 1994–2022 period"
+        )
 
 # KRIGING
 library(gstat)
 library(automap)
 
-corr_sf <- station_corr("Porto Tolle - Pradon") |> select(avg, coords)
+corr_sf <- station_corr("Auronzo") |> select(avg, coords)
 
 # fit the variogram (variance over distance)
 corr_vgm <- variogram(avg ~ 1, corr_sf, cutoff = 120, width = 4)
@@ -236,3 +338,16 @@ corr_krig <- krige(
     newdata = veneto_grid,
     model = corr_fit
 )
+
+tmp_sf <- st_set_precision(corr_krig, precision = 10^3)
+st_write(tmp_sf, "./data/tmp.shp", append = FALSE)
+corr_krig <- st_read("./data/tmp.shp")
+
+corr_krig |>
+    mutate(
+        lon = unlist(map(corr_krig$geometry, 1)),
+        lat = unlist(map(corr_krig$geometry, 2))
+    ) |>
+    ggplot() +
+        geom_raster(aes(x = lon, y = lat, fill = var1_pred)) +
+        coord_sf()
