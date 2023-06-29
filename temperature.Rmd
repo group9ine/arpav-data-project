@@ -76,15 +76,18 @@ get_daily_data("malo") |>
   geom_point(aes(y = min, colour = "min"), size = 0.1) +
   geom_point(aes(y = max, colour = "max"), size = 0.1) +
   geom_point(aes(y = avg, colour = "avg"), size = 0.1) +
-  scale_colour_manual(values = my_pal |> set_names("min", "avg", "max"),
-                      labels = list(min = "Minima", avg = "Averages", max = "Maxima")) +
+  scale_colour_manual(
+    values = my_pal |> 
+        set_names("min", "avg", "max"),
+    labels = list(min = "Minima", avg = "Averages", max = "Maxima")
+) +
   guides(colour = guide_legend(override.aes = list(size=3))) +
-  labs(x = "Date", y = "Temperature (°C)", colour = element_blank(), 
+  labs(x = "Date", y = "Temperature (°C)", colour = element_blank(),
        title = "Evolution of daily temperatures in Malo")
-
 ```
 
-To smooth things out, we can average over each month, still keeping separate the minima, averages and maxima.
+To smooth things out, we can average over each month, still keeping
+separate the minima, averages and maxima.
 
 ```{r}
 get_monthly_data <- function(station) {
@@ -107,25 +110,35 @@ get_monthly_data <- function(station) {
 
 
 ```{r}
-get_monthly_data("malo") |> 
-  mutate(date = make_date(year = year, month = as.numeric(month))) |>
-  ggplot(aes(x = date)) +
-  geom_ribbon(aes(ymin = min, ymax = max), fill = my_pal[2], alpha = 0.5) +
-  geom_line(aes(y = avg), colour = my_pal[2], linewidth = 0.8) +
-  labs(x = "Date", y = "Temperature (°C)",
-       title = "Evolution of monthly temperatures in Malo")
+get_monthly_data("malo") |>
+    mutate(date = make_date(year = year, month = as.numeric(month))) |>
+    ggplot(aes(x = date)) +
+    geom_ribbon(aes(ymin = min, ymax = max), fill = my_pal[2], alpha = 0.5) +
+    geom_line(aes(y = avg), colour = my_pal[2], linewidth = 0.8) +
+    labs(
+        x = "Date", y = "Temperature (°C)",
+        title = "Evolution of monthly temperatures in Malo"
+    )
 ```  
 
-Now, we present a different visualization of the monthly dataset, where we subtract from each record a baseline made by averaging over the first 8 years. Also, we will plot the average monthly thermal excursion (average of the maxima minus average of the minima), subject to the same baseline subtraction.
-
+Now, we present a different visualization of the monthly dataset, where we
+subtract from each record a baseline made by averaging over the first 8
+years. Also, we will plot the average monthly thermal excursion (average of
+the maxima minus average of the minima), subject to the same baseline
+subtraction.
 
 ```{r}
+print_station <- function(station) {
+    station |>
+        str_split_1("_") |>
+        paste(collapse = " ") |>
+        str_to_title()
+}
+
 temp_change_heatmaps <- function(station, avg_window) {
     require(forcats)
     require(ggplot2)
-    require(scales)
     require(stringr)
-    require(wesanderson)
 
     data <- get_monthly_data(station)
 
@@ -140,11 +153,7 @@ temp_change_heatmaps <- function(station, avg_window) {
             max = mean(.data$max)
         )
 
-    station_name <- station |>
-        str_split_1("_") |>
-        paste(collapse = " ") |>
-        str_to_title() |>
-        paste("station")
+    station_name <- paste(print_station(station), "station")
 
     temperature_plt <- data |>
         inner_join(baseline, by = "month") |>
@@ -194,11 +203,11 @@ temp_change_heatmaps <- function(station, avg_window) {
                 fill = "grey50", alpha = 0.4
             ) +
             scale_x_continuous(
-                breaks = pretty_breaks(),
+                breaks = scales::pretty_breaks(),
                 expand = c(0, 0)
             ) +
             scale_fill_gradientn(
-                colours = wes_palette("Zissou1", 10, "continuous")
+                colours = wesanderson::wes_palette("Zissou1", 10, "continuous")
             ) +
             labs(
                 x = "Year", y = "Month", fill = "Deviation (°C)",
@@ -217,7 +226,8 @@ temp_change_heatmaps <- function(station, avg_window) {
 ```{r}
 temp_change_heatmaps(station = "malo", avg_window = 8)
 ```
-Finally, to better study any significant climatic trend, we choose to take a further step in the averaging, and work with yearly temperatures.
+Finally, to better study any significant climatic trend, we choose to take
+a further step in the averaging, and work with yearly temperatures.
 
 ```{r}
 get_yearly_data <- function(station) {
@@ -252,8 +262,10 @@ get_yearly_data("malo") |>
   labs(x = "Year", y = "Temperature (°C)",
        title = "Evolution of yearly temperatures in Malo")
 ```  
-We can see from the plot that the temperature has risen over the past thirty years:
-in the next section, we will investigate the trend and try to model it using Bayesian regression.
+
+We can see from the plot that the temperature has risen over the past
+thirty years: in the next section, we will investigate the trend and try to
+model it using Bayesian regression.
 
 # Modelling the yearly temperature trend
 
@@ -267,11 +279,16 @@ get_yearly_data("malo") |>
        title = "Evolution of the average yearly temperature in Malo")
 ```
 
+... we could argue that a linear fit would provide a good description of
+the data.  Of course, the proper course of action should involve a
+statistical comparison with a null model: in this case, to see if the slope
+of the linear fit has any statistical significance, we will compare the
+results with those of a constant regression. Also, to look in the other
+direction we will analyse a more complex model, a quadratic fit, to see
+whether more parameters will provide a better fit.
 
-... we could argue that a linear fit would provide a good description of the data.
-Of course, the proper course of action should involve a statistical comparison with a null model: in this case, to see if the slope of the linear fit has any statistical significance, we will compare the results with those of a constant regression. Also, to look in the other direction we will analyse a more complex model, a quadratic fit, to see whether more parameters will provide a better fit.
-
-We use JAGS to perform the three regressions, using uniform priors to fully unbias the model comparison.
+We use JAGS to perform the three regressions, using uniform priors to fully
+unbias the model comparison.
 
 ```{r}
 lin_model <- "
@@ -359,9 +376,9 @@ regression <- function(station, model, params) {
         n.iter = 100000,
         n.burnin = 2000,
         n.thin = 10,
-        DIC = T, 
-        quiet = T
-    ) 
+        DIC = TRUE,
+        quiet = TRUE
+    )
 }
 
 plot_chains <- function(chain, params) {
@@ -384,12 +401,101 @@ plot_chains <- function(chain, params) {
     gridExtra::grid.arrange(trace_plt, dens_plt, ncol = 2)
 }
 
-plot_posteriors <- function(chain, pars){
+plot_posteriors <- function(chain, pars) {
   require(bayesplot)
-  mcmc_areas(chain, pars = pars, prob = 0.95, point_est = "mean") + 
-    labs(title = "Sampled posterior distribution",
-         subtitle = "with mean and 95% credibility interval") +
+  mcmc_areas(chain, pars = pars, prob = 0.95, point_est = "mean") +
     bayesplot::theme_default(base_size = 14, base_family = global_font)
+}
+
+plot_regression <- function(station, chain, pars) {
+    require(dplyr)
+    require(purrr)
+
+    data <- get_yearly_data(station)
+
+    n_plt <- 100
+    year_plt <- seq(min(data$year), max(data$year), length = n_plt)
+
+    a_smp <- as.vector(chain$BUGSoutput$sims.list$a)
+    a_plt <- as.vector(chain$BUGSoutput$mean$a)
+
+    sigma_smp <- map_dbl(
+        as.vector(chain$BUGSoutput$sims.list$sigma),
+        ~ rnorm(1, mean = 0, sd = .x)
+    )
+
+    if (length(pars) == 2) {
+        lower_plt <- rep(quantile(a_smp + sigma_smp, prob = 0.025), n_plt)
+        upper_plt <- rep(quantile(a_smp + sigma_smp, prob = 0.975), n_plt)
+
+        data <- data |> mutate(plt = a_plt)
+
+    } else if (length(pars) == 3) {
+        b_smp <- as.vector(chain$BUGSoutput$sims.list$b)
+        b_plt <- as.vector(chain$BUGSoutput$mean$b)
+
+        lower_plt <- map_dbl(
+            year_plt,
+            ~ quantile(
+                a_smp + .x * b_smp + sigma_smp,
+                prob = 0.025
+            )
+        )
+        upper_plt <- map_dbl(
+            year_plt,
+            ~ quantile(
+                a_smp + .x * b_smp + sigma_smp,
+                prob = 0.975
+            )
+        )
+
+        data <- data |> mutate(plt = a_plt + b_plt * .data$year)
+
+    } else if (length(pars) == 4) {
+        b_smp <- as.vector(chain$BUGSoutput$sims.list$b)
+        b_plt <- as.vector(chain$BUGSoutput$mean$b)
+
+        c_smp <- as.vector(chain$BUGSoutput$sims.list$c)
+        c_plt <- as.vector(chain$BUGSoutput$mean$c)
+
+        lower_plt <- map_dbl(
+            year_plt,
+            ~ quantile(
+                a_smp + .x * b_smp + .x^2 * c_smp + sigma_smp,
+                prob = 0.025
+            )
+        )
+        upper_plt <- map_dbl(
+            year_plt,
+            ~ quantile(
+                a_smp + .x * b_smp + .x^2 * c_smp + sigma_smp,
+                prob = 0.975
+            )
+        )
+
+        data <- data |>
+            mutate(plt = a_plt + b_plt * .data$year + c_plt * .data$year^2)
+    }
+
+    ggplot(data, aes(x = .data$year)) +
+        geom_line(aes(y = .data$avg), colour = my_pal[1], linewidth = 0.8) +
+        geom_line(aes(y = .data$plt), colour = my_pal[2], linewidth = 0.8) +
+        geom_ribbon(
+            aes(x = year_plt, ymin = .data$low, ymax = .data$upp),
+            data = tibble(low = lower_plt, upp = upper_plt),
+            fill = my_pal[2], alpha = 0.4
+        ) +
+        labs(
+            x = "Year", y = "Temperature (°C)",
+            title = paste(
+                ifelse(
+                    length(pars) == 2, "Constant",
+                    ifelse(length(pars) == 3, "Linear", "Quadratic")
+                ),
+                "regression of the average yearly temperature in",
+                print_station(station)
+            )
+        )
 }
 ```
 
@@ -400,11 +506,24 @@ lin_chain <- regression("malo", lin_model, lin_pars)
 summary(lin_chain)
 
 plot_chains(as.mcmc(lin_chain), lin_pars)
-gridExtra::grid.arrange(plot_posteriors(as.mcmc(lin_chain), "a"),
-                        plot_posteriors(as.mcmc(lin_chain), "b"),
-                        plot_posteriors(as.mcmc(lin_chain), "sigma"),
-                        ncol = 3)
+gridExtra::grid.arrange(
+    plot_posteriors(as.mcmc(lin_chain), "a"),
+    plot_posteriors(as.mcmc(lin_chain), "b"),
+    plot_posteriors(as.mcmc(lin_chain), "sigma"),
+    ncol = 3
+)
 ```
+
+```{r}
+plot_regression("malo", lin_chain, lin_pars)
+```
+
+The credibility interval (considering both the stochasticity from the
+line parameters and of the Gaussian noise around the line) incorporates
+well the fitted data: the trend is clearly linear.
+
+Let’s proceed with the other two models, the constant regression first.
+
 ```{r}
 const_chain <- regression("malo", const_model, const_pars)
 summary(const_chain)
@@ -413,6 +532,31 @@ plot_chains(as.mcmc(const_chain), const_pars)
 gridExtra::grid.arrange(plot_posteriors(as.mcmc(const_chain), "a"),
                         plot_posteriors(as.mcmc(const_chain), "sigma"),
                         ncol = 2)
+```
+
+By inspecting the prosteriors and the chains, the constant model does not
+seem disastrous: so we need some robust tests to verify whether the linear
+regression works better (see later).
+
+The `a` coefficient is in good agreement with the overall mean of the
+fitted temperatures, as it should be.
+
+```{r}
+get_yearly_data("malo") |>
+    summarize(mean = mean(avg), sd = sd(avg)) |>
+    mutate_if(is.numeric, format, digits = 3) |>
+    kableExtra::kbl(caption = "`a` from data") |>
+    kableExtra::kable_styling(full_width = FALSE)
+
+cat(paste(
+    "Best a from MCMC:",
+    format(const_chain$BUGSoutput$mean$a, digits = 3), "±",
+    format(const_chain$BUGSoutput$sd$a, digits = 3)
+))
+```
+
+```{r}
+plot_regression("malo", const_chain, const_pars)
 ```
 
 ```{r}
@@ -425,41 +569,65 @@ gridExtra::grid.arrange(plot_posteriors(as.mcmc(quad_chain), "a"),
                         plot_posteriors(as.mcmc(quad_chain), "sigma"),
                         ncol = 2)
 ```
+
+The quadratic fit has a different problem: the posteriors of `a`, `b` and
+`c` are extremely wide. Let’s check the mean values against the data.
+
 ```{r}
-
-const_fit <- as.mcmc(const_chain) |> tidybayes::tidy_draws() |> select(a) |> 
-  summarize(a = mean(a))
-
-lin_fit <- as.mcmc(lin_chain) |> tidybayes::tidy_draws() |> select(a, b) |> 
-  summarize(a = mean(a), b = mean(b))
-
-quad_fit <- as.mcmc(quad_chain) |> tidybayes::tidy_draws() |> select(a, b, c) |> 
-  summarize(a = mean(a), b = mean(b), c = mean(c))
-
-get_yearly_data("malo") |> 
-  ggplot(aes(x = year)) +
-  geom_line(aes(y = avg), colour = my_pal[2], linewidth = 0.8) +
-  geom_line(aes(y = const_fit$a), colour = my_pal[3], linewidth = 0.8) +
-  labs(x = "Year", y = "Temperature (°C)",
-       title = "Evolution of the average yearly temperature in Malo")
-
-get_yearly_data("malo") |> 
-  ggplot(aes(x = year)) +
-  geom_line(aes(y = avg), colour = my_pal[2], linewidth = 0.8) +
-  geom_line(aes(y = lin_fit$a + lin_fit$b * year), colour = my_pal[3], linewidth = 0.8) +
-  labs(x = "Year", y = "Temperature (°C)",
-       title = "Evolution of the average yearly temperature in Malo")
-
-get_yearly_data("malo") |> 
-  ggplot(aes(x = year)) +
-  geom_line(aes(y = avg), colour = my_pal[2], linewidth = 0.8) +
-  geom_line(aes(y = quad_fit$a + quad_fit$b * year + quad_fit$c * year^2), colour = my_pal[3], linewidth = 0.8) +
-  labs(x = "Year", y = "Temperature (°C)",
-       title = "Evolution of the average yearly temperature in Malo")
+plot_regression("malo", quad_chain, quad_pars)
 ```
 
+We get indeed a good fit – in fact, it’s indistinguishable from the linear
+one – so the posteriors are at least well centred on the right values. The
+curve is practically a straight line, so we have already a strong hint that
+the quadratic model brings only unneccesary additional complexity without
+improving the descriptive power.
 
-Since we are drawing samples with a MCMC, we cannot calculate something like the Bayes Factor to compare the models, because we do not have direct access to the likelihood.
+Since this quadratic fit was not satisfactory, we can try using more
+focused priors for the parabola parameters: we choose to use the estimates 
+from a simple `lm` fit.
+
+```{r}
+lm_fit <- lm(avg ~ year + I(year^2), get_yearly_data("malo"))
+lm_params <- summary(lm_fit)$coefficients[, 1]
+lm_errs <- summary(lm_fit)$coefficients[, 2]
+
+quad_model_2 <- sprintf("
+    model {
+        tau <- 1 / sigma^2
+
+        for (i in 1:length(year)) {
+            mu[i] <- a + b * year[i] + c * year[i] * year[i]
+            avg[i] ~ dnorm(mu[i], tau)
+        }
+
+        a ~ dnorm(%e, %e)
+        b ~ dnorm(%e, %e)
+        c ~ dnorm(%e, %e)
+        sigma ~ dexp(0.0001)
+    }",
+    lm_params[1], 1 / lm_errs[1]^2,
+    lm_params[2], 1 / lm_errs[2]^2,
+    lm_params[3], 1 / lm_errs[3]^2
+)
+
+quad_chain_2 <- regression("malo", quad_model_2, quad_pars)
+
+gridExtra::grid.arrange(plot_posteriors(as.mcmc(quad_chain_2), "a"),
+                        plot_posteriors(as.mcmc(quad_chain_2), "b"),
+                        plot_posteriors(as.mcmc(quad_chain_2), "c"),
+                        plot_posteriors(as.mcmc(quad_chain_2), "sigma"),
+                        ncol = 2)
+
+```
+
+Even in this case, the quadratic parameter `c` is small and the posteriors
+are very wide. This is a sign that the likelihood is extremely flat: almost
+any choice of `a` and `b` leads to a good (over)fit.
+
+Since we are drawing samples with a MCMC, we cannot calculate something
+like the Bayes Factor to compare the models, because we do not have direct
+access to the likelihood.
 
 A suitable (and commonplace in MCMC analysis) alternative is given by the
 Deviance Information Criterion (DIC). This quantity is defined starting
@@ -483,11 +651,9 @@ The second term roughly quantifies the effective number of parameters: the
 larger it is, the easier it is for the model to fit the data, and so the
 deviance needs to be penalized.
 
-
 ```{r}
 get_dic <- function(chain) {
   chain$BUGSoutput$DIC
-  
 }
 
 tribble(
@@ -497,13 +663,15 @@ tribble(
   "Quadratic", format(get_dic(quad_chain),digits=3)
 ) |> kableExtra::kbl() |> kableExtra::kable_styling(full_width = F)
 ```
-The DIC highlights that probably we don't need a more complex model than a linear one since the value is exactly the same.
 
+The DIC highlights that we probably don’t need a more complex model than
+the linear one, since the value is exactly the same.
 
-# Test on the chains
-
-Now we perform an hypotesis test to the linear chain posterior, in particular to the slope, to see if it is significantly grater than 0.
-So we set a null hypotesis $H_0: b \leq 0$ and test it with a 95% interval of Credibility.
+## Hypothesis test on the linear model
+Now we will check, with an hypothesis test on the posterior drawn from the
+chain, if the slope of the linear model is significantly greater than zero.
+So, we set up a null hypotesis $H_0: b \leq 0$ and test it at a 5% level of
+significance.
 
 ```{r}
 lin_df <- as.mcmc(lin_chain) |> tidybayes::tidy_draws()
@@ -519,58 +687,21 @@ ggplot(lin_df) +
         colour = my_pal[3], fill = my_pal[3], alpha = 0.5
     ) +
     geom_vline(xintercept = 0, colour = my_pal[2], linewidth = 0.8) +
-    coord_cartesian(expand = FALSE)
+    coord_cartesian(expand = FALSE) +
+    labs(
+        x = "Slope of the linear regression",
+        y = "Sampled posterior density",
+    )
 ```
 
-Clearly we can reject the Null Hypotesis and stand that a growing linear model is suitable for our data.
-
-
-Since the previous quadratic fit was not satisfactory, now we try to guide the MCMC with priors based on the parameter estimate through a frequentist fit done with `lm` function.
-```{r}
-lm_fit <- lm(avg ~ year + I(year^2), get_yearly_data("malo"))
-lm_params <- summary(lm_fit)$coefficients[, 1]
-lm_errs <- summary(lm_fit)$coefficients[, 2]
-
-quad_model <- sprintf("
-    model {
-        tau <- 1 / sigma^2
-
-        for (i in 1:length(year)) {
-            mu[i] <- a + b * year[i] + c * year[i] * year[i]
-            avg[i] ~ dnorm(mu[i], tau)
-        }
-
-        a ~ dnorm(%e, %e)
-        b ~ dnorm(%e, %e)
-        c ~ dnorm(%e, %e)
-        sigma ~ dexp(0.0001)
-    }",
-    lm_params[1], 1 / lm_errs[1]^2,
-    lm_params[2], 1 / lm_errs[2]^2,
-    lm_params[3], 1 / lm_errs[3]^2
-)
-
-quad_pars <- c("a", "b", "c", "sigma")
-
-quad_chain <- regression("malo", quad_model, quad_pars)
-
-best_pars <- as.mcmc(quad_chain) |>
-    tidybayes::tidy_draws() |>
-    select(a, b, c, sigma) |>
-    summarize(a = mean(a), b = mean(b), c = mean(c), sigma = mean(sigma))
-
-gridExtra::grid.arrange(plot_posteriors(as.mcmc(quad_chain), "a"),
-                        plot_posteriors(as.mcmc(quad_chain), "b"),
-                        plot_posteriors(as.mcmc(quad_chain), "c"),
-                        plot_posteriors(as.mcmc(quad_chain), "sigma"),
-                        ncol = 2)
-
-```
-Even in this case the quadratic parameter $c$ is compatible with 0 and the variances of all the posteriors are huge, this is a sign that the likelihood is extremely flat and almost any choice of the parameter leads to a good (over)fit.
+We can comfortably reject the null hypothesis, and state at a 95% level of
+credibility that the temperatures display a rising trend through the years.
 
 # Correlation between the stations
 
-To study the correlations between different locations, we compute the Pearson coefficient between the temperature readings through the years in the two stations.
+To study the correlations between different locations, we compute the
+Pearson coefficient between the temperature readings through the years 
+between two given stations.
 
 ```{r}
 correlation_plot <- function(stat1, stat2) {
@@ -613,22 +744,45 @@ correlation_plot <- function(stat1, stat2) {
 }
 ```
 
-```{r}
-mal_rov_corr <- correlation_plot("malo", "roverchiara")
+To give an example, let’s check Porto Tolle and Roverchiara, two
+low-altitude locations.
 
-mal_rov_corr$cor
-mal_rov_corr$plot
+```{r}
+por_rov_corr <- correlation_plot("porto_tolle", "roverchiara")
+
+por_rov_corr$cor
+por_rov_corr$plot
 ```
 
-As expected older years (for both the locations) are clustered in the colder zone while the more recent one lay in the hotter corner.
+As expected older years (for both locations) are clustered in the
+colder zone, while more recent years lie in the hotter corner.
 
-We can appreciate that the average temperature in each year is similar in stations with same environmental feature, and a more detailed analysis about this phenomenon will be done in the last chapter.
+We can already appreciate how the points lie close to the diagonal, i.e.
+the (averaged) temperature readings are consistently similar in similar
+environments. A more detailed analysis on this phenomenon will be presented
+in the last chapter.
+
+Now let’s try swapping Porto Tolle for a mountainous location, Agordo. We
+expect the scatterplot to widen at least a little bit.
+
+```{r}
+aur_rov_corr <- correlation_plot("auronzo", "roverchiara")
+
+aur_rov_corr$cor
+aur_rov_corr$plot
+```
+
+There are indeed more points far from the diagonal. We will see better the
+difference in the last chapter.
 
 # Data averaged over years
+Assuming the increasing trend linear model is the best to describe the
+yearly dataset, we average temperatures over a given value of years
+interval.
 
-Assuming the increasing trend linear model is the best to describe the yearly dataset, we average temperatures over a given value of years interval.
-
-Then we perform a linear Bayesian regression with JAGS as before to estimate the temperature change rate and compare it with the one found by SNPA for maxima, minima and averages.
+Then we perform a linear Bayesian regression with JAGS as before to
+estimate the temperature change rate and compare it with the one found by
+SNPA for maxima, minima and averages.
 
 ```{r}
 get_period_data <- function(station, interval) {
