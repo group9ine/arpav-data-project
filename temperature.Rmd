@@ -1256,3 +1256,309 @@ diff_unrolling <- function(stat, py) {
 
 diff_unrolling("auronzo", 15)
 ```
+
+# Spatial analysis
+To analyse the correlations between the different stations more in depth,
+we will perform a spatial analysis over the entire Veneto region. On its
+website, ARPAV
+(provides)[https://www.arpa.veneto.it/dati-ambientali/open-data/clima/principali-variabili-meteorologiche]
+records ranging from 1994 to 2022 of monthly-averaged readings of
+temperature and other meteorological variables, for every station in
+Veneto. So, we will import this data and make use of the geographical
+information on the position of the stations provided together with the
+meteorological records.
+
+```{r}
+library(sf)
+
+data_path <- "./data/monthly/"
+file_names <- list.files(data_path)
+
+raw_data <- file_names |>
+    map(~ readLines(paste0(data_path, .x), encoding = "latin1"))
+
+# get a vector of correctly formatted station names
+station_names <- file_names |>
+    str_replace(".csv$", "") |>
+    str_split("_") |>
+    map(~ paste(.x, collapse = " ")) |>
+    unlist()
+names(raw_data) <- station_names
+```
+
+The `csv` files contain a lot of – for our purpouses – useless stuff, so
+we will filter what we need, the temperatures and the station coordinates.
+
+```{r}
+# get station coordinates from each file
+stations_sf <- raw_data |>
+    map(
+        function(file) {
+            x_line <- grep("Coordinata X", file)[1]
+
+            # get Gauss-Boaga coordinates
+            gb_coords <- file[c(x_line, x_line + 1)] |>
+                str_extract("[[:digit:]]+") |>
+                as.integer() |>
+                t()
+
+            # convert to WGS84
+            sf_project(
+                from = st_crs(3003),
+                to = st_crs(4326),
+                pts = gb_coords
+            ) |> as.vector()
+        }
+    ) |>
+    enframe() |>
+    unnest_wider(value, names_sep = "_") |>
+    set_names("station", "lon", "lat") |>
+    st_as_sf(coords = c("lon", "lat"), crs = st_crs(4326))
+
+full_data <- enframe(raw_data, name = "station", value = "dump") |>
+    unnest(dump) |>
+    group_by(station) |>
+    group_modify(
+        function(x, y) {
+            mins <- x$dump[seq(
+                grep("^Parametro Temperatura.*minime", x$dump) + 5,
+                grep("valore medio delle minime", x$dump) - 3
+            )]
+            mins <- read.csv(
+                text = mins,
+                sep = ";", dec = ".",
+                header = FALSE, na.strings = ">>",
+                col.names = c("year", month.abb, "yavg")
+            ) |>
+                select(-yavg) |>
+                pivot_longer(-year, names_to = "month", values_to = "min")
+
+            avgs <- x$dump[seq(
+                grep("^Parametro Temperatura.*medie", x$dump) + 5,
+                grep("valore medio delle medie", x$dump) - 3
+            )]
+            avgs <- read.csv(
+                text = avgs,
+                sep = ";", dec = ".",
+                header = FALSE, na.strings = ">>",
+                col.names = c("year", month.abb, "yavg")
+            ) |>
+                select(-yavg) |>
+                pivot_longer(-year, names_to = "month", values_to = "avg")
+
+            maxs <- x$dump[seq(
+                grep("^Parametro Temperatura.*massime", x$dump) + 5,
+                grep("valore medio delle massime", x$dump) - 3
+            )]
+            maxs <- read.csv(
+                text = maxs,
+                sep = ";", dec = ".",
+                header = FALSE, na.strings = ">>",
+                col.names = c("year", month.abb, "yavg")
+            ) |>
+                select(-yavg) |>
+                pivot_longer(-year, names_to = "month", values_to = "max")
+
+            right_join(mins, avgs, by = c("year", "month")) |>
+                left_join(maxs, by = c("year", "month"))
+        }
+    ) |>
+    drop_na()
+```
+
+Also, we need a map of Veneto: we used one from the (ISTAT
+website)[https://www.istat.it/it/archivio/222527] with
+the province boundaries.
+
+```{r}
+maps_folder <- "./data/maps/province"
+select_veneto <- sprintf("
+    SELECT DEN_PROV + DEN_CM AS province
+    FROM %s
+    WHERE DEN_PROV IN ('Belluno', 'Padova', 'Rovigo',
+                       'Treviso', 'Verona', 'Vicenza')
+       OR DEN_CM = 'Venezia'",
+    st_layers(maps_folder)$name[1]
+)
+veneto_sf <- st_read(maps_folder, query = select_veneto) |>
+    mutate(province = factor(str_replace(province, "-", "")))
+veneto_sf <- st_transform(veneto_sf, 4326)
+```
+
+```{r}
+ggplot() +
+    geom_sf(aes(fill = province), data = veneto_sf) +
+    geom_sf(data = stations_sf) +
+    coord_sf() +
+    labs(x = "Longitude", y = "Latitude", fill = "Province")
+```
+
+## Correlation in yearly temperatures
+The first thing we will do with this data is to analyse the correlation
+between the different stations. As we have said before, we have chosen to
+measure the correlation with the Pearson coefficient between the
+yearly-averaged temperature readings of any two stations. The idea is to
+select a sample of stations (the ones we listed at the beginning) and
+calculate the correlations with all the other stations in the database.
+
+Actually, differently from before, we choose to compute the correlations
+between the *differenced* yearly averages, i.e. the average – of the
+minima, averages or maxima – in a given year minus the one of the previous
+year.  This way we are effectively looking at how much a station agrees
+with another in recording a year hotter or colder than the previous one.
+
+```{r}
+station_corr <- function(stat) {
+    require(dplyr)
+    require(purrr)
+
+    # keep only full years
+    full_data <- full_data |>
+        group_by(.data$station, .data$year) |>
+        filter(n() == 12) |>
+        ungroup()
+
+    stat_data <- full_data |>
+        filter(.data$station == stat) |>
+        group_by(.data$year) |>
+        summarize(
+            min = mean(.data$min),
+            avg = mean(.data$avg),
+            max = mean(.data$max)
+        ) |>
+        # compute differences between years
+        mutate(across(min:max, ~ .x - lag(.x))) |>
+        na.omit()
+
+    stat_years <- full_data |>
+        filter(.data$station == stat) |>
+        pull(.data$year) |>
+        unique()
+
+    compatibles <- full_data |>
+        # filter out selected station
+        filter(.data$station != stat) |>
+        group_by(.data$station) |>
+        distinct(.data$year) |>
+        # operational for the same number of years
+        filter(n() == length(stat_years)) |>
+        # and the years should match too
+        filter(.data$year == stat_years) |>
+        pull(.data$station) |>
+        unique()
+
+    # compute correlation with compatible stations
+    map_dfr(
+        compatibles,
+        function(s) {
+            s_data <- full_data |>
+                filter(.data$station == s) |>
+                # compute yearly data
+                group_by(.data$year) |>
+                summarize(
+                    min = mean(.data$min),
+                    avg = mean(.data$avg),
+                    max = mean(.data$max)
+                ) |>
+                # compute differences between years
+                mutate(across(min:max, ~ .x - lag(.x))) |>
+                na.omit()
+
+            tibble(
+                min = cor(stat_data$min, s_data$min),
+                avg = cor(stat_data$avg, s_data$avg),
+                max = cor(stat_data$max, s_data$max)
+            )
+        }
+    ) |>
+        # add station coordinates and convert to sf object
+        mutate(
+            station = compatibles,
+            coords = stations_sf |>
+                filter(.data$station %in% compatibles) |>
+                pull(.data$geometry),
+            .before = 1
+        ) |>
+        st_as_sf(sf_column_name = "coords")
+}
+```
+
+To have a nice smooth plot over the surface, we can build a grid and
+interpolate the correlation values outside the station points with a
+technique called 
+*Inverse Distance Weighting* (IDW), which is simply a weighted mean of the
+available samples, with the weights being the distance between a station
+and the current point in the grid, risen to a power $p$ which is selected
+empirically (to adjust the tradeoff between overall smoothness and
+faithfulness around the sampled points).
+
+```{r}
+# define a square grid and clip it to the Veneto shape
+veneto_grid <- st_make_grid(veneto_sf, n = 100, what = "corners")
+veneto_grid <- veneto_grid[veneto_sf]
+
+plot_spatial_corr <- function(st_name, type) {
+    require(gstat)
+
+    corr_sf <- station_corr(st_name) |> select(type, "coords")
+
+    # inverse distance weighting over the grid
+    idw(
+        formula = as.formula(paste(type, "~ 1")),
+        locations = corr_sf,
+        newdata = veneto_grid,
+        idp = 2
+    ) |>
+        mutate(
+            lon = unlist(map(.data$geometry, 1)),
+            lat = unlist(map(.data$geometry, 2))
+        ) |>
+        ggplot() +
+            geom_raster(
+                aes(x = .data$lon, y = .data$lat, fill = .data$var1.pred)
+            ) +
+            geom_sf(data = veneto_sf, fill = NA, colour = "black") +
+            geom_sf_text(
+                aes(label = .data$station),
+                data = stations_sf |> filter(.data$station == st_name),
+                colour = "firebrick",
+                nudge_x = 0.125,
+                nudge_y = 0.03
+            ) +
+            geom_sf(
+                data = stations_sf |> filter(.data$station == st_name),
+                colour = "firebrick",
+                size = 3
+            ) +
+            geom_sf(
+                data = stations_sf |> filter(.data$station != st_name),
+                size = 0.5
+            ) +
+            scale_fill_viridis_c() +
+            coord_sf() +
+            labs(
+                x = "Longitude", y = "Latitude",
+                fill = "Correlation",
+                title = paste(
+                    "Correlation with the temperature* records in",
+                    st_name, "across Veneto"
+                ),
+                subtitle = paste(
+                    "*yearly averages of the",
+                    ifelse(
+                        type == "min", "minima",
+                        ifelse(type == "avg", "averages", "maxima")
+                    )
+                )
+            )
+}
+```
+
+```{r}
+plot_spatial_corr("Auronzo", "avg")
+plot_spatial_corr("Castelfranco Veneto", "avg")
+plot_spatial_corr("Cavallino Treporti", "avg")
+plot_spatial_corr("Malo", "avg")
+plot_spatial_corr("Porto Tolle - Pradon", "avg")
+plot_spatial_corr("Roverchiara", "avg")
+```
