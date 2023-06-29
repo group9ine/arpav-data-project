@@ -15,7 +15,23 @@ output:
 knitr::opts_chunk$set(message = FALSE, dev = "svg")
 ```
 
-```{r}
+In this project, we will examine temperature data coming from ARPAV (Agenzia Regionale per la Protezione dell'Ambiente - Veneto) stations over the Veneto region.
+Most of the analysis pertains to the following locations: 
+
+* Auronzo di Cadore (Lat: 46°33'33" N, Long: 12°25'28" E, Height above sea level: 887 m)
+* Castelfranco Veneto (Lat: 45°40'00" N, Long: 11°55'00" E, Height above sea level: 46 m)
+* Porto Tolle (Lat: 44°56'58" N, Long: 12°19'28" E, Height above sea level: -22 m)
+* Roverchiara (Lat: 45°16'10" N, Long: 11°14'41" E, Height above sea level: 20 m)
+* Cavallino-Treporti (Lat: 45°27'31" N, Long 12°29'11" E, Height above sea level: 1 m)
+* Malo (Lat: 45°40'10" N, Long 11°27'52" E, Height above sea level: 98 m)
+
+We have access to daily temperature records (minimum, average and maximum) in different temporal windows over the past three or four decades (see later for details).
+
+The main goal of the project is to investigate the temperature trend over the years, as recorded by these stations, and test if there is a general increase in temperature, compatibly with the climate change.
+
+# Data import and pre-processing
+
+```{r, echo = F}
 library(tidyverse)
 library(R2jags)
 library(bayesplot)
@@ -27,6 +43,9 @@ global_font <- "Roboto Condensed"
 theme_set(theme_minimal(base_size = 15, base_family = global_font))
 my_pal <- wesanderson::wes_palette("Zissou1", 5)[c(1, 3, 5)]
 ```
+
+First, we inspect the datasets with a function that does minimal manipulations;
+the data is stored in `csv` files holding daily temperatures records in each row.
 
 ```{r}
 get_daily_data <- function(station) {
@@ -41,7 +60,33 @@ get_daily_data <- function(station) {
         show_col_types = FALSE
     ) |> na.omit()
 }
+```
 
+```{r}
+get_daily_data("malo") |>
+  head() |>
+  kableExtra::kbl() |>
+  kableExtra::kable_styling(full_width = F) 
+```
+
+
+```{r}
+get_daily_data("malo") |> 
+  ggplot(aes(x = date)) +
+  geom_point(aes(y = min, colour = "min"), size = 0.1) +
+  geom_point(aes(y = max, colour = "max"), size = 0.1) +
+  geom_point(aes(y = avg, colour = "avg"), size = 0.1) +
+  scale_colour_manual(values = my_pal |> set_names("min", "avg", "max"),
+                      labels = list(min = "Minima", avg = "Averages", max = "Maxima")) +
+  guides(colour = guide_legend(override.aes = list(size=3))) +
+  labs(x = "Date", y = "Temperature (°C)", colour = element_blank(), 
+       title = "Evolution of daily temperatures in Malo")
+
+```
+
+To smooth things out, we can average over each month, still keeping separate the minima, averages and maxima.
+
+```{r}
 get_monthly_data <- function(station) {
     require(dplyr)
     require(lubridate)
@@ -58,7 +103,23 @@ get_monthly_data <- function(station) {
             max = mean(.data$max)
         )
 }
+```
 
+
+```{r}
+get_monthly_data("malo") |> 
+  mutate(date = make_date(year = year, month = as.numeric(month))) |>
+  ggplot(aes(x = date)) +
+  geom_ribbon(aes(ymin = min, ymax = max), fill = my_pal[2], alpha = 0.5) +
+  geom_line(aes(y = avg), colour = my_pal[2], linewidth = 0.8) +
+  labs(x = "Date", y = "Temperature (°C)",
+       title = "Evolution of monthly temperatures in Malo")
+```  
+
+Now, we present a different visualization of the monthly dataset, where we subtract from each record a baseline made by averaging over the first 8 years. Also, we will plot the average monthly thermal excursion (average of the maxima minus average of the minima), subject to the same baseline subtraction.
+
+
+```{r}
 temp_change_heatmaps <- function(station, avg_window) {
     require(forcats)
     require(ggplot2)
@@ -154,8 +215,9 @@ temp_change_heatmaps <- function(station, avg_window) {
 ```
 
 ```{r}
-temp_change_heatmaps(station = "castelfranco_veneto", avg_window = 10)
+temp_change_heatmaps(station = "malo", avg_window = 8)
 ```
+Finally, to better study any significant climatic trend, we choose to take a further step in the averaging, and work with yearly temperatures.
 
 ```{r}
 get_yearly_data <- function(station) {
@@ -181,6 +243,35 @@ get_yearly_data <- function(station) {
         )
 }
 ```
+
+```{r}
+get_yearly_data("malo") |> 
+  ggplot(aes(x = year)) +
+  geom_ribbon(aes(ymin = min, ymax = max), fill = my_pal[2], alpha = 0.5) +
+  geom_line(aes(y = avg), colour = my_pal[2], linewidth = 0.8) +
+  labs(x = "Year", y = "Temperature (°C)",
+       title = "Evolution of yearly temperatures in Malo")
+```  
+We can see from the plot that the temperature has risen over the past thirty years:
+in the next section, we will investigate the trend and try to model it using Bayesian regression.
+
+# Modelling the yearly temperature trend
+
+If we look at the yearly averages...
+
+```{r}
+get_yearly_data("malo") |> 
+  ggplot(aes(x = year)) +
+  geom_line(aes(y = avg), colour = my_pal[2], linewidth = 0.8) +
+  labs(x = "Year", y = "Temperature (°C)",
+       title = "Evolution of the average yearly temperature in Malo")
+```
+
+
+... we could argue that a linear fit would provide a good description of the data.
+Of course, the proper course of action should involve a statistical comparison with a null model: in this case, to see if the slope of the linear fit has any statistical significance, we will compare the results with those of a constant regression. Also, to look in the other direction we will analyse a more complex model, a quadratic fit, to see whether more parameters will provide a better fit.
+
+We use JAGS to perform the three regressions, using uniform priors to fully unbias the model comparison.
 
 ```{r}
 lin_model <- "
@@ -268,8 +359,9 @@ regression <- function(station, model, params) {
         n.iter = 100000,
         n.burnin = 2000,
         n.thin = 10,
-        DIC = FALSE
-    ) |> coda::as.mcmc()
+        DIC = T, 
+        quiet = T
+    ) 
 }
 
 plot_chains <- function(chain, params) {
@@ -291,12 +383,130 @@ plot_chains <- function(chain, params) {
 
     gridExtra::grid.arrange(trace_plt, dens_plt, ncol = 2)
 }
+
+plot_posteriors <- function(chain, pars){
+  require(bayesplot)
+  mcmc_areas(chain, pars = pars, prob = 0.95, point_est = "mean") + 
+    labs(title = "Sampled posterior distribution",
+         subtitle = "with mean and 95% credibility interval") +
+    bayesplot::theme_default(base_size = 14, base_family = global_font)
+}
+```
+
+Let's start with the linear model.
+
+```{r}
+lin_chain <- regression("malo", lin_model, lin_pars)
+summary(lin_chain)
+
+plot_chains(as.mcmc(lin_chain), lin_pars)
+gridExtra::grid.arrange(plot_posteriors(as.mcmc(lin_chain), "a"),
+                        plot_posteriors(as.mcmc(lin_chain), "b"),
+                        plot_posteriors(as.mcmc(lin_chain), "sigma"),
+                        ncol = 3)
+```
+```{r}
+const_chain <- regression("malo", const_model, const_pars)
+summary(const_chain)
+
+plot_chains(as.mcmc(const_chain), const_pars)
+gridExtra::grid.arrange(plot_posteriors(as.mcmc(const_chain), "a"),
+                        plot_posteriors(as.mcmc(const_chain), "sigma"),
+                        ncol = 2)
 ```
 
 ```{r}
-lin_chain <- regression("porto_tolle", lin_model, lin_pars)
+quad_chain <- regression("malo", quad_model, quad_pars)
 
-lin_df <- do.call(rbind.data.frame, lin_chain)
+plot_chains(as.mcmc(quad_chain), quad_pars)
+gridExtra::grid.arrange(plot_posteriors(as.mcmc(quad_chain), "a"),
+                        plot_posteriors(as.mcmc(quad_chain), "b"),
+                        plot_posteriors(as.mcmc(quad_chain), "c"),
+                        plot_posteriors(as.mcmc(quad_chain), "sigma"),
+                        ncol = 2)
+```
+```{r}
+
+const_fit <- as.mcmc(const_chain) |> tidybayes::tidy_draws() |> select(a) |> 
+  summarize(a = mean(a))
+
+lin_fit <- as.mcmc(lin_chain) |> tidybayes::tidy_draws() |> select(a, b) |> 
+  summarize(a = mean(a), b = mean(b))
+
+quad_fit <- as.mcmc(quad_chain) |> tidybayes::tidy_draws() |> select(a, b, c) |> 
+  summarize(a = mean(a), b = mean(b), c = mean(c))
+
+get_yearly_data("malo") |> 
+  ggplot(aes(x = year)) +
+  geom_line(aes(y = avg), colour = my_pal[2], linewidth = 0.8) +
+  geom_line(aes(y = const_fit$a), colour = my_pal[3], linewidth = 0.8) +
+  labs(x = "Year", y = "Temperature (°C)",
+       title = "Evolution of the average yearly temperature in Malo")
+
+get_yearly_data("malo") |> 
+  ggplot(aes(x = year)) +
+  geom_line(aes(y = avg), colour = my_pal[2], linewidth = 0.8) +
+  geom_line(aes(y = lin_fit$a + lin_fit$b * year), colour = my_pal[3], linewidth = 0.8) +
+  labs(x = "Year", y = "Temperature (°C)",
+       title = "Evolution of the average yearly temperature in Malo")
+
+get_yearly_data("malo") |> 
+  ggplot(aes(x = year)) +
+  geom_line(aes(y = avg), colour = my_pal[2], linewidth = 0.8) +
+  geom_line(aes(y = quad_fit$a + quad_fit$b * year + quad_fit$c * year^2), colour = my_pal[3], linewidth = 0.8) +
+  labs(x = "Year", y = "Temperature (°C)",
+       title = "Evolution of the average yearly temperature in Malo")
+```
+
+
+Since we are drawing samples with a MCMC, we cannot calculate something like the Bayes Factor to compare the models, because we do not have direct access to the likelihood.
+
+A suitable (and commonplace in MCMC analysis) alternative is given by the
+Deviance Information Criterion (DIC). This quantity is defined starting
+from the *deviance* of the posterior,
+
+$$
+    \overline{D(\theta)} = \mathrm{E}_\theta [D(\theta)]
+                         = \mathrm{E}_\theta [-2 \log p(y \,|\, \theta)]
+$$
+
+where $y$ stands for the data and $\theta$ for the model parameters. 
+This is a measure of the goodness-of-fit of the model. JAGS then
+defines the DIC as
+
+$$
+    \mathrm{DIC}_{\mathrm{JAGS}} = \overline{D(\theta)} 
+                                 + \frac{1}{2} \mathrm{Var}[D(\theta)].
+$$
+
+The second term roughly quantifies the effective number of parameters: the
+larger it is, the easier it is for the model to fit the data, and so the
+deviance needs to be penalized.
+
+
+```{r}
+get_dic <- function(chain) {
+  chain$BUGSoutput$DIC
+  
+}
+
+tribble(
+  ~ model, ~ DIC,
+  "Constant", format(get_dic(const_chain),digits=3),
+  "Linear", format(get_dic(lin_chain),digits=3),
+  "Quadratic", format(get_dic(quad_chain),digits=3)
+) |> kableExtra::kbl() |> kableExtra::kable_styling(full_width = F)
+```
+The DIC highlights that probably we don't need a more complex model than a linear one since the value is exactly the same.
+
+
+# Test on the chains
+
+Now we perform an hypotesis test to the linear chain posterior, in particular to the slope, to see if it is significantly grater than 0.
+So we set a null hypotesis $H_0: b \leq 0$ and test it with a 95% interval of Credibility.
+
+```{r}
+lin_df <- as.mcmc(lin_chain) |> tidybayes::tidy_draws()
 sig_level <- quantile(lin_df$b, probs = 0.05)
 
 ggplot(lin_df) +
@@ -312,13 +522,12 @@ ggplot(lin_df) +
     coord_cartesian(expand = FALSE)
 ```
 
-```{r}
-quad_chain <- regression("porto_tolle", quad_model, quad_pars) |>
-    plot_chains(quad_pars)
-```
+Clearly we can reject the Null Hypotesis and stand that a growing linear model is suitable for our data.
 
+
+Since the previous quadratic fit was not satisfactory, now we try to guide the MCMC with priors based on the parameter estimate through a frequentist fit done with `lm` function.
 ```{r}
-lm_fit <- lm(avg ~ year + I(year^2), get_yearly_data("porto_tolle"))
+lm_fit <- lm(avg ~ year + I(year^2), get_yearly_data("malo"))
 lm_params <- summary(lm_fit)$coefficients[, 1]
 lm_errs <- summary(lm_fit)$coefficients[, 2]
 
@@ -343,13 +552,25 @@ quad_model <- sprintf("
 
 quad_pars <- c("a", "b", "c", "sigma")
 
-quad_chain <- regression("porto_tolle", quad_model, quad_pars)
+quad_chain <- regression("malo", quad_model, quad_pars)
 
-best_pars <- quad_chain |>
+best_pars <- as.mcmc(quad_chain) |>
     tidybayes::tidy_draws() |>
     select(a, b, c, sigma) |>
     summarize(a = mean(a), b = mean(b), c = mean(c), sigma = mean(sigma))
+
+gridExtra::grid.arrange(plot_posteriors(as.mcmc(quad_chain), "a"),
+                        plot_posteriors(as.mcmc(quad_chain), "b"),
+                        plot_posteriors(as.mcmc(quad_chain), "c"),
+                        plot_posteriors(as.mcmc(quad_chain), "sigma"),
+                        ncol = 2)
+
 ```
+Even in this case the quadratic parameter $c$ is compatible with 0 and the variances of all the posteriors are huge, this is a sign that the likelihood is extremely flat and almost any choice of the parameter leads to a good (over)fit.
+
+# Correlation between the stations
+
+To study the correlations between different locations, we compute the Pearson coefficient between the temperature readings through the years in the two stations.
 
 ```{r}
 correlation_plot <- function(stat1, stat2) {
@@ -398,6 +619,16 @@ mal_rov_corr <- correlation_plot("malo", "roverchiara")
 mal_rov_corr$cor
 mal_rov_corr$plot
 ```
+
+As expected older years (for both the locations) are clustered in the colder zone while the more recent one lay in the hotter corner.
+
+We can appreciate that the average temperature in each year is similar in stations with same environmental feature, and a more detailed analysis about this phenomenon will be done in the last chapter.
+
+# Data averaged over years
+
+Assuming the increasing trend linear model is the best to describe the yearly dataset, we average temperatures over a given value of years interval.
+
+Then we perform a linear Bayesian regression with JAGS as before to estimate the temperature change rate and compare it with the one found by SNPA for maxima, minima and averages.
 
 ```{r}
 get_period_data <- function(station, interval) {
@@ -466,24 +697,30 @@ period_regression <- function(data, type) {
         n.burnin = 2000,
         n.thin = 10,
         DIC = FALSE
-    ) |> coda::as.mcmc()
+    )
 }
 ```
 
 ```{r}
 period_length <- 5
-period_data <- get_period_data("castelfranco_veneto", period_length)
+period_data <- get_period_data("auronzo", period_length)
 period_chain <- period_regression(period_data, "avg")
 
-plot_chains(period_chain, lin_pars)
+plot_chains(as.mcmc(period_chain), lin_pars)
+
+gridExtra::grid.arrange(plot_posteriors(as.mcmc(period_chain), "a"),
+                        plot_posteriors(as.mcmc(period_chain), "b"),
+                        plot_posteriors(as.mcmc(period_chain), "sigma"),
+                        ncol = 2)
+
 ```
 
 Data from SNPA:
 
-> La stima aggiornata del rateo di variazione della temperatura media dal
-> 1981 al 2019 è di +0,38 ± 0,05 °C/10 anni; il rateo di variazione della
-> temperatura massima (+0,42 ± 0,06 °C/10 anni) è maggiore di quello della
-> temperatura minima (+0,34 ± 0,04 °C/10 anni).
+>"La stima aggiornata del rateo di variazione della temperatura media dal
+>1981 al 2019 è di +0,38 ± 0,05 °C/10 anni; il rateo di variazione della
+>temperatura massima (+0,42 ± 0,06 °C/10 anni) è maggiore di quello della
+>temperatura minima (+0,34 ± 0,04 °C/10 anni)."
 
 ```{r}
 snpa <- tibble(
@@ -540,6 +777,209 @@ snpa_comparison <- function(chain, st_name, type, interval) {
 }
 ```
 
+To compare the two measurements we approximate the posterior with a normal distribution, with same mean and variance given by the variance of the chain, and we suppose as normal also the value found by SNPA.
+
+With this assumptions we can perform an hypothesis test where we put as Null Hypothesis that the difference between the two measurements is different from 0, $H_0: z\neq0$ where $z=m_1-m_2, \sigma_z^2 = \sigma_{m_1}^2 + \sigma_{m_2}^2$
+
 ```{r}
-snpa_comparison(period_chain, "Castelfranco Veneto", "avg", period_length)
+gridExtra::grid.arrange(
+  snpa_comparison(as.mcmc(period_chain), "Auronzo", "min", period_length),
+  snpa_comparison(as.mcmc(period_chain), "Auronzo", "avg", period_length),
+  snpa_comparison(as.mcmc(period_chain), "Auronzo", "max", period_length),
+  ncol = 3 ) 
+
+
+```
+
+In this case 0 lies in the acceptance zone so we can say that the two measurements are compatible with a 95% confidence.
+
+# Analysis of the Time Series
+
+ARIMA (Autoregressive Integrated Moving Average) models provide an approach to time series forecasting with the aim to describe the autocorrelations in the data.
+
+This models are based on:
+Differencing, change between consecutive observations in the original series
+
+$$y'_t = y_t -y_{t-1} $$
+Autoregression, forecasting the variable of interest using a linear combination of past values of the variable
+
+$$y_t = c + \phi_1 y_{t-1} + \phi_2 y_{t-2} + ... + \phi_p y_{t-p} + \epsilon_t $$
+where $\epsilon_t$ is normally distributed white noise with mean zero and variance one.
+
+Moving average, past forecast errors in a regression-like model
+
+$$y_t = c + \epsilon_t + \theta_1 \epsilon_{t-1} + \theta_2 \epsilon_{t-2} + ... + \theta_q \epsilon_{t-q} $$
+If we combine differencing with autoregression and a moving average model, we obtain a non-seasonal ARIMA model
+
+$$y'_t = c + \phi_1 y'_{t-1} + \phi_2 y'_{t-2} + ... + \phi_p y'_{t-p} + \epsilon_t + \theta_1 \epsilon_{t-1} + \theta_2 \epsilon_{t-2} + ... + \theta_q \epsilon_{t-q} $$
+where we finnaly recognize:
+* $p =$ order of the autoregressive part
+* $d =$ degree of differencing 
+* $q =$ order of the moving average part
+
+We now undergo the following procedure to fit with ARIMA:
+If the data are non-stationary, we take first differences of the data until the data are stationary; then choose some reasonable models and see for which of them the AIC is lower and we examine the ACF of the residuals to see if the trend is compatible with white noise and finally compute the forecast.
+
+```{r}
+#FORECAST
+#install.packages('forecast')
+library(forecast)
+```
+```{r}
+get_diff_data <- function(station){
+  get_yearly_data(station) |>
+    reframe(
+      year = year,
+      diff_avg = c(0,diff(avg)),
+      diff_min = c(0,diff(min)),
+      diff_max = c(0,diff(max))
+    ) |>
+    tail(-1)
+}
+
+forecast_prediction <- function(data_type, station, pred_years, interv=5){
+  
+  if(data_type == "diff"){
+    df <- get_diff_data(station)
+    time_series <- ts(
+      data = df$diff_avg,
+      frequency = 1,
+      start = c(df$year[1])
+    )
+    aa <- Arima(time_series, order = c(5,0,5))
+    print(aa)
+    fc <- forecast(aa, level = c(95), h = pred_years)
+  }
+  
+  else if(data_type == "yearly"){
+    df <- get_yearly_data(station)
+    time_series <- ts(
+      data = df$avg,
+      frequency = 1,
+      start = c(df$year[1])
+    )
+    aa <- Arima(time_series, order = c(3,1,4))
+    print(aa)
+    #aa <- auto.arima(time_series)
+    fc <- forecast(aa, level = c(95), h = pred_years)
+  }
+  
+  else if(data_type == "period"){
+    df <- get_period_data(station, interv)
+    time_series <- ts(
+      data = df$avg,
+      frequency = 1/interv,
+      start = c(df$centre[1])
+    )
+    aa <- Arima(time_series, order = c(3,1,3))
+    print(aa)
+    fc <- forecast(aa, level = c(95), h = as.integer(pred_years/interv))
+  }
+   
+  else if(data_type == "monthly"){
+    df <- get_monthly_data(station)
+    time_series <- ts(
+      data = df$avg,
+      frequency = 12,
+      start = c(df$year,as.numeric(df$month[1]))
+    )
+    aa <- Arima(time_series, order = c(3,0,1), seasonal=c(0,1,2), lambda = 0)
+    print(aa)
+    fc <- forecast(aa, level = c(95), h = pred_years*12)
+  }
+  
+  gridExtra::grid.arrange(
+                           autoplot(time_series) + theme_bw(base_size = 8) +
+                             labs(xlab = "time",
+                                  ylab = paste(data_type, "temperature trend"),
+                                  title = "time series"),
+                           ggAcf(time_series) + theme_bw(base_size = 8) +
+                             labs(xlab = "lag",
+                                  ylab = "acf",
+                                  title = "acf of the time series"),
+                           ggAcf(aa$residuals) +theme_bw(base_size = 8) +
+                             labs(xlab = "lag",
+                                  ylab = "acf",
+                                  title = "acf of the residuals"),
+                           autoplot(fc) + theme_bw(base_size = 8) +
+                             labs(xlab = "time",
+                                  ylab = paste(data_type, "temperature trend"),
+                                  title = "forecast of the time series"),
+                           ncol = 2
+                          )
+   
+   return(fc)
+  
+}
+
+diff_unrolling <- function(stat, py){
+  
+  malo_pred <- forecast_prediction(data_type = "diff", station = stat,
+                             pred_years = py)
+  
+  start_year <- get_yearly_data(stat)$year[length(get_yearly_data(stat)$year)]
+  start_temp <- get_yearly_data(stat)$avg[length(get_yearly_data(stat)$avg)]
+  pred_df <- data.frame( x = seq(start_year+1, start_year+py),
+                   y = start_temp + cumsum(malo_pred$mean)
+                 )
+  
+  ggplot(data = get_yearly_data(stat)) + geom_line(aes(x = year, y = avg)) +
+    geom_line(data = pred_df, aes(x = x, y = y), col = my_pal[1], linewidth = 2) +
+    labs(xlab = "year", ylab = "avg temperature", title = "avg temperature prevision")
+  
+}
+
+diff_unrolling("auronzo", 15)
+```
+
+
+```{r}
+const_model <- "
+    model {
+        tau <- 1 / sigma^2
+
+        for (i in 1:length(year)) {
+            diff_avg[i] ~ dnorm(a, tau);
+        }
+
+        a ~ dnorm(0.04, 100)
+        sigma ~ dexp(0.0001);
+    }"
+
+
+diff_chain <- R2jags::jags(
+        data = get_diff_data("auronzo"),
+        inits = function() {
+            list(
+                a = runif(1, -200, 0),
+                sigma = runif(1, 0, 1)
+            )
+            },
+        parameters.to.save = const_pars,
+        model.file = textConnection(const_model),
+        n.chains = 3,
+        n.iter = 100000,
+        n.burnin = 2000,
+        n.thin = 10,
+        DIC = FALSE
+    ) |> coda::as.mcmc()
+
+plot_chains(diff_chain, const_pars)
+
+
+const_diff <- do.call(rbind.data.frame, diff_chain)
+sig_level <- quantile(const_diff$a, probs = 0.05)
+
+ggplot(const_diff) +
+    geom_density(aes(a), colour = my_pal[1], fill = my_pal[1], alpha = 0.5) +
+    geom_area(
+        aes(x, y),
+        data = tibble(
+            x = density(const_diff$a, from = -0.5, to = sig_level)$x,
+            y = density(const_diff$a, from = -0.5, to = sig_level)$y),
+        colour = my_pal[3], fill = my_pal[3], alpha = 0.5
+    ) +
+    geom_vline(xintercept = 0, colour = my_pal[2], linewidth = 0.8) +
+    geom_vline(xintercept = 0.04) +
+    coord_cartesian(expand = FALSE)
 ```
