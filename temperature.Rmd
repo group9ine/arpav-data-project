@@ -9,6 +9,7 @@ output:
         thumbnails: false
         lightbox: true
         gallery: true
+        code_folding: hide
 ---
 
 ```{r setup, include = FALSE}
@@ -19,7 +20,7 @@ In this project, we will examine temperature data coming from ARPAV (Agenzia Reg
 Most of the analysis pertains to the following locations: 
 
 ```{r, echo = FALSE}
-tribble(
+tibble::tribble(
     ~ "Station", ~ "Latitude", ~ "Longitude", ~ "Height above sea level",
     "Auronzo di Cadore", "46°33′33″ N", "12°25′28″ E", "887 m",
     "Castelfranco Veneto", "45°40′00″ N", "11°55′00″ E", "46 m",
@@ -295,7 +296,7 @@ model it using Bayesian regression.
 If we take a look at the yearly averages...
 
 ```{r}
-get_yearly_data("malo") |> 
+get_yearly_data("malo") |>
     ggplot(aes(x = year)) +
     geom_line(aes(y = avg), colour = my_pal[2], linewidth = 0.8) +
     labs(
@@ -312,8 +313,8 @@ results with those of a constant regression. Also, to look in the other
 direction we will analyse a more complex model, a quadratic fit, to see
 whether more parameters will provide a better fit.
 
-We use JAGS to perform the three regressions, using uniform priors to fully
-unbias the model comparison.
+We use `JAGS` to perform the three regressions, using uniform priors to
+fully unbias the model comparison.
 
 ```{r}
 lin_model <- "
@@ -1061,8 +1062,8 @@ the data.
 
 These models are based on:
 
- - **Differencing:** change between consecutive observations in the original
- series
+ - **Differencing:** change between consecutive observations in the
+ original series
 
     $$
         y'_t = y_t - y_{t-1}
@@ -1174,7 +1175,7 @@ forecast_prediction <- function(
 
     fc_plt <- gridExtra::grid.arrange(
         autoplot(time_series) +
-            theme(base_size = 8) +
+            theme_minimal(base_size = 8, base_family = global_font) +
             labs(
                 x = "Time",
                 y = paste(
@@ -1187,13 +1188,13 @@ forecast_prediction <- function(
                 title = "Time series"
             ),
         ggAcf(time_series) +
-            theme(base_size = 8) +
+            theme_minimal(base_size = 8, base_family = global_font) +
             labs(x = "Lag", y = "ACF", title = "ACF of the time series"),
         ggAcf(aa$residuals) +
-            theme(base_size = 8) +
+            theme_minimal(base_size = 8, base_family = global_font) +
             labs(x = "Lag", y = "ACF", title = "ACF of the residuals"),
         autoplot(fc) +
-            theme(base_size = 8) +
+            theme_minimal(base_size = 8, base_family = global_font) +
             labs(
                 x = "Time",
                 y = paste(
