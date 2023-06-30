@@ -965,9 +965,17 @@ plot_period_regression <- function(station, type, chain, interval) {
 
     lower_plt <- map_dbl(
         year_plt,
-        ~ quantile(a_smp + .x * b_smp + sigma_smp, prob = 0.025)
+        ~ quantile(a_smp + .x * b_smp, prob = 0.025)
     )
     upper_plt <- map_dbl(
+        year_plt,
+        ~ quantile(a_smp + .x * b_smp, prob = 0.975)
+    )
+    sig_lower_plt <- map_dbl(
+        year_plt,
+        ~ quantile(a_smp + .x * b_smp + sigma_smp, prob = 0.025)
+    )
+    sig_upper_plt <- map_dbl(
         year_plt,
         ~ quantile(a_smp + .x * b_smp + sigma_smp, prob = 0.975)
     )
@@ -985,6 +993,16 @@ plot_period_regression <- function(station, type, chain, interval) {
             aes(x = year_plt, ymin = .data$low, ymax = .data$upp),
             data = tibble(low = lower_plt, upp = upper_plt),
             fill = my_pal[2], alpha = 0.4
+        ) +
+        geom_line(
+            aes(x = year_plt, y = upp),
+            data = tibble(upp = sig_upper_plt),
+            linetype = "dashed", linewidth = 0.8, colour = my_pal[3]
+        ) +
+        geom_line(
+            aes(x = year_plt, y = low),
+            data = tibble(low = sig_lower_plt),
+            linetype = "dashed", linewidth = 0.8, colour = my_pal[3]
         ) +
         scale_x_continuous(breaks = scales::pretty_breaks()) +
         labs(
