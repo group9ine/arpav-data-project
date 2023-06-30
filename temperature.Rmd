@@ -452,8 +452,14 @@ plot_regression <- function(station, chain, pars) {
     )
 
     if (length(pars) == 2) {
-        lower_plt <- rep(quantile(a_smp + sigma_smp, prob = 0.025), n_plt)
-        upper_plt <- rep(quantile(a_smp + sigma_smp, prob = 0.975), n_plt)
+        lower_plt <- rep(quantile(a_smp, prob = 0.025), n_plt)
+        upper_plt <- rep(quantile(a_smp, prob = 0.975), n_plt)
+        sig_lower_plt <- rep(
+            quantile(a_smp + sigma_smp, prob = 0.025), n_plt
+        )
+        sig_upper_plt <- rep(
+            quantile(a_smp + sigma_smp, prob = 0.975), n_plt
+        )
 
         data <- data |> mutate(plt = a_plt)
 
@@ -462,18 +468,18 @@ plot_regression <- function(station, chain, pars) {
         b_plt <- as.vector(chain$BUGSoutput$mean$b)
 
         lower_plt <- map_dbl(
-            year_plt,
-            ~ quantile(
-                a_smp + .x * b_smp + sigma_smp,
-                prob = 0.025
-            )
+            year_plt, ~ quantile(a_smp + .x * b_smp, prob = 0.025)
         )
         upper_plt <- map_dbl(
+            year_plt, ~ quantile(a_smp + .x * b_smp, prob = 0.975)
+        )
+        sig_lower_plt <- map_dbl(
             year_plt,
-            ~ quantile(
-                a_smp + .x * b_smp + sigma_smp,
-                prob = 0.975
-            )
+            ~ quantile(a_smp + .x * b_smp + sigma_smp, prob = 0.025)
+        )
+        sig_upper_plt <- map_dbl(
+            year_plt,
+            ~ quantile(a_smp + .x * b_smp + sigma_smp, prob = 0.975)
         )
 
         data <- data |> mutate(plt = a_plt + b_plt * .data$year)
@@ -487,16 +493,22 @@ plot_regression <- function(station, chain, pars) {
 
         lower_plt <- map_dbl(
             year_plt,
-            ~ quantile(
-                a_smp + .x * b_smp + .x^2 * c_smp + sigma_smp,
-                prob = 0.025
-            )
+            ~ quantile(a_smp + .x * b_smp + .x^2 * c_smp, prob = 0.025)
         )
         upper_plt <- map_dbl(
             year_plt,
+            ~ quantile(a_smp + .x * b_smp + .x^2 * c_smp, prob = 0.975)
+        )
+        sig_lower_plt <- map_dbl(
+            year_plt,
             ~ quantile(
-                a_smp + .x * b_smp + .x^2 * c_smp + sigma_smp,
-                prob = 0.975
+                a_smp + .x * b_smp + .x^2 * c_smp + sigma_smp, prob = 0.025
+            )
+        )
+        sig_upper_plt <- map_dbl(
+            year_plt,
+            ~ quantile(
+                a_smp + .x * b_smp + .x^2 * c_smp + sigma_smp, prob = 0.975
             )
         )
 
@@ -511,6 +523,16 @@ plot_regression <- function(station, chain, pars) {
             aes(x = year_plt, ymin = .data$low, ymax = .data$upp),
             data = tibble(low = lower_plt, upp = upper_plt),
             fill = my_pal[2], alpha = 0.4
+        ) +
+        geom_line(
+            aes(x = year_plt, y = upp),
+            data = tibble(upp = sig_upper_plt),
+            linetype = "dashed", linewidth = 0.8, colour = my_pal[3]
+        ) +
+        geom_line(
+            aes(x = year_plt, y = low),
+            data = tibble(low = sig_lower_plt),
+            linetype = "dashed", linewidth = 0.8, colour = my_pal[3]
         ) +
         labs(
             x = "Year", y = "Temperature (°C)",
@@ -1502,7 +1524,7 @@ faithfulness around the sampled points).
 veneto_grid <- st_make_grid(veneto_sf, n = 100, what = "corners")
 veneto_grid <- veneto_grid[veneto_sf]
 
-plot_spatial_corr <- function(st_name, type) {
+plot_spatial_corr <- function(st_name, type, idp) {
     require(gstat)
 
     corr_sf <- station_corr(st_name) |> select(type, "coords")
@@ -1512,7 +1534,7 @@ plot_spatial_corr <- function(st_name, type) {
         formula = as.formula(paste(type, "~ 1")),
         locations = corr_sf,
         newdata = veneto_grid,
-        idp = 2
+        idp = idp
     ) |>
         mutate(
             lon = unlist(map(.data$geometry, 1)),
@@ -1553,12 +1575,20 @@ plot_spatial_corr <- function(st_name, type) {
 ```
 
 ```{r, fig.width = 11, fig.height = 9}
-plot_spatial_corr("Auronzo", "avg")
-plot_spatial_corr("Castelfranco Veneto", "avg")
-plot_spatial_corr("Cavallino Treporti", "avg")
-plot_spatial_corr("Malo", "avg")
-plot_spatial_corr("Porto Tolle - Pradon", "avg")
-plot_spatial_corr("Roverchiara", "avg")
+plot_spatial_corr("Auronzo", "avg", 2)
+plot_spatial_corr("Castelfranco Veneto", "avg", 2)
+plot_spatial_corr("Cavallino Treporti", "avg", 2)
+plot_spatial_corr("Malo", "avg", 2)
+plot_spatial_corr("Porto Tolle - Pradon", "avg", 2)
+plot_spatial_corr("Roverchiara", "avg", 2)
+```
+
+Let’s try also with a different inverse distance power, 0.5 instead of 2.
+
+```{r, fig.width = 11, fig.height = 9}
+plot_spatial_corr("Auronzo", "avg", 0.5)
+plot_spatial_corr("Cavallino Treporti", "avg", 0.5)
+plot_spatial_corr("Malo", "avg", 0.5)
 ```
 
 ## Differences in the temperature increase
@@ -1603,14 +1633,14 @@ yearly_fits <- yearly_fits |>
     st_as_sf(sf_column_name = "coords")
 ```
 ```{r}
-plot_spatial_trend <- function(type) {
+plot_spatial_trend <- function(type, idp) {
     require(gstat)
 
     idw(
         formula = as.formula(paste(type, " ~ 1")),
         locations = yearly_fits,
         newdata = veneto_grid,
-        idp = 2
+        idp = idp
     ) |>
         mutate(
             lon = unlist(map(.data$geometry, 1)),
@@ -1641,7 +1671,14 @@ plot_spatial_trend <- function(type) {
 ```
 
 ```{r, fig.width = 11, fig.height = 9}
-plot_spatial_trend("min")
-plot_spatial_trend("avg")
-plot_spatial_trend("max")
+plot_spatial_trend("min", 2)
+plot_spatial_trend("avg", 2)
+plot_spatial_trend("max", 2)
+```
+
+And now with more smoothing.
+```{r, fig.width = 11, fig.height = 9}
+plot_spatial_trend("min", 0.5)
+plot_spatial_trend("avg", 0.5)
+plot_spatial_trend("max", 0.5)
 ```
